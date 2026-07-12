@@ -533,12 +533,36 @@ async function startSpeechInput() {
     stopRecognition()
     callState.value = '识别中'
     try {
-      const audioBase64 = await recordPcm16(5200)
+      const audioBase64 = await recordPcm16(8000)
+      // If no speech detected, silently restart listening in auto mode
+      if (!audioBase64) {
+        if (screen.value === 'call') {
+          callState.value = '通话中'
+          if (autoListenMode.value && !chatLoading.value) {
+            setTimeout(() => {
+              if (callState.value === '通话中' && screen.value === 'call') {
+                startSpeechInput()
+              }
+            }, 300)
+          }
+        }
+        return
+      }
       const result = await transcribeAudio(currentSceneId.value, audioBase64)
       const text = result?.text?.trim()
       if (text) {
         await handleSend(text)
       } else {
+        // No text recognized, auto-retry in auto mode
+        if (screen.value === 'call' && autoListenMode.value && !chatLoading.value) {
+          callState.value = '通话中'
+          setTimeout(() => {
+            if (callState.value === '通话中' && screen.value === 'call') {
+              startSpeechInput()
+            }
+          }, 300)
+          return
+        }
         chatError.value = result?.degraded ? '语音识别暂不可用，请改用文字回复。' : '没有听清，请再说一遍。'
       }
     } catch (error) {
@@ -568,23 +592,70 @@ async function startSpeechInput() {
   recognition.start()
 }
 
-async function recordPcm16(durationMs = 5000) {
+async function recordPcm16(durationMs = 8000) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
   const AudioContextClass = window.AudioContext || window.webkitAudioContext
   const audioContext = new AudioContextClass()
   const source = audioContext.createMediaStreamSource(stream)
   const processor = audioContext.createScriptProcessor(4096, 1, 1)
   const chunks = []
+
+  // VAD (Voice Activity Detection) parameters
+  const SILENCE_THRESHOLD = 0.015    // amplitude below this is silence
+  const SILENCE_DURATION = 1200      // ms of silence before stopping
+  const MIN_RECORD_TIME = 800        // minimum recording time (ms)
+  let silenceStart = 0
+  let hasSpeech = false
+  let recordStart = Date.now()
+  let stopped = false
+
   processor.onaudioprocess = (event) => {
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
+    if (stopped) return
+    const data = event.inputBuffer.getChannelData(0)
+    chunks.push(new Float32Array(data))
+
+    // Calculate RMS volume
+    let sum = 0
+    for (let i = 0; i < data.length; i++) {
+      sum += data[i] * data[i]
+    }
+    const rms = Math.sqrt(sum / data.length)
+    const elapsed = Date.now() - recordStart
+
+    if (rms > SILENCE_THRESHOLD) {
+      hasSpeech = true
+      silenceStart = 0
+    } else if (hasSpeech && elapsed > MIN_RECORD_TIME) {
+      if (!silenceStart) {
+        silenceStart = Date.now()
+      } else if (Date.now() - silenceStart > SILENCE_DURATION) {
+        // User stopped speaking
+        stopped = true
+      }
+    }
   }
+
   source.connect(processor)
   processor.connect(audioContext.destination)
-  await new Promise((resolve) => window.setTimeout(resolve, durationMs))
+
+  // Wait for either silence detection or max duration
+  await new Promise((resolve) => {
+    const checkInterval = setInterval(() => {
+      if (stopped || Date.now() - recordStart >= durationMs) {
+        clearInterval(checkInterval)
+        resolve()
+      }
+    }, 100)
+  })
+
   processor.disconnect()
   source.disconnect()
   stream.getTracks().forEach((track) => track.stop())
   await audioContext.close()
+
+  // If no speech detected at all, return empty to avoid sending noise
+  if (!hasSpeech) return ''
+
   const merged = mergeFloat32(chunks)
   const pcm16 = encodePcm16(downsample(merged, audioContext.sampleRate, 16000))
   return arrayBufferToBase64(pcm16)
