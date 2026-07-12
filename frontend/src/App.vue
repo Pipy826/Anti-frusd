@@ -598,78 +598,109 @@ async function startSpeechInput() {
 }
 
 async function recordPcm16(durationMs = 8000) {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+  // Use MediaRecorder for better mobile compatibility
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } })
+  
+  // Check if AudioContext approach works (desktop), otherwise use MediaRecorder
   const AudioContextClass = window.AudioContext || window.webkitAudioContext
   const audioContext = new AudioContextClass()
-  const source = audioContext.createMediaStreamSource(stream)
-  const processor = audioContext.createScriptProcessor(4096, 1, 1)
-  const chunks = []
-
-  // VAD (Voice Activity Detection) parameters
-  const SILENCE_THRESHOLD = 0.008    // lower threshold for mobile
-  const SILENCE_DURATION = 1500      // ms of silence before stopping
-  const MIN_RECORD_TIME = 1000       // minimum recording time (ms)
-  const MAX_RECORD_TIME = durationMs // hard limit
-  let silenceStart = 0
-  let hasSpeech = false
-  let recordStart = Date.now()
-  let stopped = false
-
-  processor.onaudioprocess = (event) => {
-    if (stopped) return
-    const data = event.inputBuffer.getChannelData(0)
-    chunks.push(new Float32Array(data))
-
-    // Calculate RMS volume
-    let sum = 0
-    for (let i = 0; i < data.length; i++) {
-      sum += data[i] * data[i]
-    }
-    const rms = Math.sqrt(sum / data.length)
-    const elapsed = Date.now() - recordStart
-
-    // Hard time limit
-    if (elapsed >= MAX_RECORD_TIME) {
-      stopped = true
-      return
-    }
-
-    if (rms > SILENCE_THRESHOLD) {
-      hasSpeech = true
-      silenceStart = 0
-    } else if (hasSpeech && elapsed > MIN_RECORD_TIME) {
-      if (!silenceStart) {
-        silenceStart = Date.now()
-      } else if (Date.now() - silenceStart > SILENCE_DURATION) {
-        stopped = true
-      }
+  
+  // On mobile, AudioContext may be suspended and ScriptProcessor unreliable
+  // Use MediaRecorder + decodeAudioData approach instead
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+    ? 'audio/webm;codecs=opus' 
+    : MediaRecorder.isTypeSupported('audio/webm') 
+      ? 'audio/webm' 
+      : 'audio/mp4'
+  
+  const recorder = new MediaRecorder(stream, { mimeType })
+  const audioChunks = []
+  
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) {
+      audioChunks.push(event.data)
     }
   }
 
-  source.connect(processor)
-  processor.connect(audioContext.destination)
+  // Start recording with timeslice for periodic data
+  recorder.start(500)
 
-  // Wait for either silence detection or max duration
+  // VAD using AnalyserNode (works better on mobile than ScriptProcessor)
+  const source = audioContext.createMediaStreamSource(stream)
+  const analyser = audioContext.createAnalyser()
+  analyser.fftSize = 2048
+  analyser.smoothingTimeConstant = 0.3
+  source.connect(analyser)
+  
+  const dataArray = new Uint8Array(analyser.frequencyBinCount)
+  const SILENCE_THRESHOLD = 10       // frequency bin average below this = silence
+  const SILENCE_DURATION = 1500      // ms of silence to stop
+  const MIN_RECORD_TIME = 1200       // min recording time
+  let silenceStart = 0
+  let hasSpeech = false
+  let recordStart = Date.now()
+
   await new Promise((resolve) => {
     const checkInterval = setInterval(() => {
-      if (stopped || Date.now() - recordStart >= MAX_RECORD_TIME) {
-        stopped = true
+      const elapsed = Date.now() - recordStart
+      
+      // Hard time limit
+      if (elapsed >= durationMs) {
         clearInterval(checkInterval)
         resolve()
+        return
       }
-    }, 100)
+
+      // Check volume via analyser
+      analyser.getByteFrequencyData(dataArray)
+      let sum = 0
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i]
+      }
+      const avg = sum / dataArray.length
+
+      if (avg > SILENCE_THRESHOLD) {
+        hasSpeech = true
+        silenceStart = 0
+      } else if (hasSpeech && elapsed > MIN_RECORD_TIME) {
+        if (!silenceStart) {
+          silenceStart = Date.now()
+        } else if (Date.now() - silenceStart > SILENCE_DURATION) {
+          clearInterval(checkInterval)
+          resolve()
+        }
+      }
+    }, 150)
   })
 
-  processor.disconnect()
+  // Stop recording
+  recorder.stop()
   source.disconnect()
   stream.getTracks().forEach((track) => track.stop())
+  
+  // Wait for final data
+  await new Promise((resolve) => { recorder.onstop = resolve })
+  
+  if (!hasSpeech || audioChunks.length === 0) {
+    await audioContext.close()
+    return ''
+  }
+
+  // Convert recorded audio to PCM16
+  const blob = new Blob(audioChunks, { type: mimeType })
+  const arrayBuffer = await blob.arrayBuffer()
+  
+  let audioBuffer
+  try {
+    audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+  } catch {
+    await audioContext.close()
+    return ''
+  }
   await audioContext.close()
 
-  // If too short or no speech, return empty
-  if (!hasSpeech || chunks.length < 3) return ''
-
-  const merged = mergeFloat32(chunks)
-  const pcm16 = encodePcm16(downsample(merged, audioContext.sampleRate, 16000))
+  const rawData = audioBuffer.getChannelData(0)
+  const pcm16 = encodePcm16(downsample(rawData, audioBuffer.sampleRate, 16000))
   return arrayBufferToBase64(pcm16)
 }
 
