@@ -1,0 +1,52 @@
+services:
+  backend:
+    image: anti-fraud-backend:1.0
+    build:
+      context: ./backend
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/chat/completions}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      LLM_PROVIDER_ORDER: ${LLM_PROVIDER_ORDER:-deepseek,qwen,wenxin}
+      TTS_PROVIDER: ${TTS_PROVIDER:-browser}
+      TTS_RATE: ${TTS_RATE:-0.95}
+      TTS_TIMEOUT: ${TTS_TIMEOUT:-12}
+      ASR_PROVIDER: ${ASR_PROVIDER:-browser}
+      ASR_TIMEOUT: ${ASR_TIMEOUT:-20}
+      XFYUN_APPID: ${XFYUN_APPID:-}
+      XFYUN_API_SECRET: ${XFYUN_API_SECRET:-}
+      XFYUN_API_KEY: ${XFYUN_API_KEY:-}
+      XFYUN_TTS_ENDPOINT: ${XFYUN_TTS_ENDPOINT:-wss://tts-api.xfyun.cn/v2/tts}
+      XFYUN_TTS_AUE: ${XFYUN_TTS_AUE:-lame}
+      XFYUN_TTS_AUF: ${XFYUN_TTS_AUF:-audio/L16;rate=16000}
+      XFYUN_TTS_VOICE_FEMALE: ${XFYUN_TTS_VOICE_FEMALE:-xiaoyan}
+      XFYUN_TTS_VOICE_MALE: ${XFYUN_TTS_VOICE_MALE:-aisjiuxu}
+      XFYUN_TTS_VOICE_NEUTRAL: ${XFYUN_TTS_VOICE_NEUTRAL:-aisxping}
+      XFYUN_TTS_VOLUME: ${XFYUN_TTS_VOLUME:-55}
+      XFYUN_TTS_PITCH: ${XFYUN_TTS_PITCH:-50}
+      XFYUN_ASR_ENDPOINT: ${XFYUN_ASR_ENDPOINT:-wss://iat.cn-huabei-1.xf-yun.com/v1}
+      XFYUN_ASR_PROTOCOL: ${XFYUN_ASR_PROTOCOL:-v1}
+      XFYUN_ASR_DOMAIN: ${XFYUN_ASR_DOMAIN:-slm}
+      XFYUN_ASR_LANGUAGE: ${XFYUN_ASR_LANGUAGE:-zh_cn}
+      XFYUN_ASR_ACCENT: ${XFYUN_ASR_ACCENT:-mandarin}
+      XFYUN_ASR_SAMPLE_RATE: ${XFYUN_ASR_SAMPLE_RATE:-16000}
+      XFYUN_ASR_EOS: ${XFYUN_ASR_EOS:-1800}
+      ANTI_FRAUD_DB_PATH: /app/data/anti_fraud.db
+    volumes:
+      - anti_fraud_data:/app/data
+      - anti_fraud_logs:/app/logs
+    restart: unless-stopped
+
+  frontend:
+    image: anti-fraud-frontend:1.0
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  anti_fraud_data:
+  anti_fraud_logs:

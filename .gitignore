@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+frontend/pnpm-lock.yaml
+backend/data/
+backend/logs/
+release/

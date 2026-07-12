@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>反诈话术陪练助手</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app" aria-live="polite">
+    <section class="screen screen-home is-active" data-screen="home">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <div class="notice"><span>⚠</span><p>本工具仅用于反诈科普学习，所有场景均为模拟虚构，如遇真实诈骗，请立即拨打全国反诈专线 <b>96110</b></p></div>
+      <header class="hero">
+        <div>
+          <h1>反诈话术陪练助手</h1>
+          <p>沉浸式模拟对话，练就反诈火眼金睛</p>
+        </div>
+        <img src="./assets/hero-shield.png" alt="">
+      </header>
+      <div class="scene-list">
+        <article class="scene-card">
+          <img src="./assets/scene-delivery.png" alt="">
+          <div>
+            <h2>快递理赔诈骗</h2>
+            <p class="stars">难度：<b>★★★</b></p>
+            <p>冒充快递/物流客服，以订单异常、快递破损为由诱导理赔，套取支付信息</p>
+            <button class="primary small" data-scene="0">开始挑战</button>
+          </div>
+        </article>
+        <article class="scene-card">
+          <img src="./assets/scene-family.png" alt="">
+          <div>
+            <h2>AI冒充亲友借钱</h2>
+            <p class="stars">难度：<b>★★★</b></p>
+            <p>利用 AI 合成声音，冒充亲友/老师以急事、受伤为由紧急借钱</p>
+            <button class="primary small" data-scene="1">开始挑战</button>
+          </div>
+        </article>
+        <article class="scene-card">
+          <img src="./assets/scene-job.png" alt="">
+          <div>
+            <h2>AI兼职刷单诈骗</h2>
+            <p class="stars">难度：<b>★★☆</b></p>
+            <p>包装成 AI 数据标注、配音兼职，先垫小额返利，诱导多充值刷任务</p>
+            <button class="primary small" data-scene="2">开始挑战</button>
+          </div>
+        </article>
+      </div>
+      <nav class="tabbar">
+        <button class="tab active" data-go="home"><span class="nav-icon nav-home"></span>首页</button>
+        <button class="tab" data-go="history"><span class="nav-icon nav-clock"></span>历史记录</button>
+        <button class="tab" data-go="profile"><span class="nav-icon nav-user"></span>我的</button>
+      </nav>
+    </section>
+
+    <section class="screen chat-screen" data-screen="chat">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <header class="chat-head">
+        <button class="icon-btn" data-go="home">‹</button>
+        <h2 id="chatTitle">快递理赔诈骗</h2>
+        <button class="danger" data-go="review">结束挑战</button>
+      </header>
+      <div class="time-pill">10:21</div>
+      <div class="messages" id="messages">
+        <div class="msg ai"><img src="./assets/bot.png" alt=""><p>您好，这里是XX快递客服。您的快递在运输过程中丢失，需要为您办理理赔退款。</p></div>
+        <div class="msg me"><p>真的吗？怎么处理呢？</p><img src="./assets/user.png" alt=""></div>
+        <div class="msg ai"><img src="./assets/bot.png" alt=""><p>是的，系统检测到您的订单已异常，请点击链接填写个人信息进行即时申请。</p></div>
+        <div class="msg me"><p>好的，我看看。</p><img src="./assets/user.png" alt=""></div>
+      </div>
+      <div class="quick">
+        <button>这是什么链接？</button>
+        <button>需要收费吗？</button>
+        <button>我再想想</button>
+      </div>
+      <form class="composer" id="composer">
+        <button type="button" class="round">♩</button>
+        <input id="replyInput" placeholder="输入您的回复..." autocomplete="off">
+        <button class="primary send">发送</button>
+        <button type="button" class="round">＋</button>
+      </form>
+    </section>
+
+    <section class="screen call-screen" data-screen="incoming">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <button class="icon-btn back" data-go="home">‹</button>
+      <button class="dots">⠿</button>
+      <div class="caller-top">
+        <h2>未知来电</h2>
+        <p>188 **** 8888</p>
+        <span>上海</span>
+      </div>
+      <div class="avatar-rings"><span></span></div>
+      <div class="caller-name">
+        <h3>快递客服</h3>
+        <p>可能是诈骗电话</p>
+      </div>
+      <div class="answer-row">
+        <button class="call-action red" data-go="home">☎<small>拒绝</small></button>
+        <button class="call-action green" data-go="call">☎<small>接听</small></button>
+      </div>
+      <button class="sms">▰ 短信回复</button>
+    </section>
+
+    <section class="screen call-screen" data-screen="call">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <button class="icon-btn back" data-go="incoming">‹</button>
+      <button class="dots">⠿</button>
+      <div class="call-title">
+        <h2>快递客服</h2>
+        <p>00:28</p>
+        <span>通话中</span>
+      </div>
+      <div class="avatar-rings active"><span></span></div>
+      <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <p class="record-tip">为了保障您的权益，通话可能会被录音</p>
+      <div class="call-tools">
+        <button>♩<small>静音</small></button>
+        <button>⠿<small>键盘</small></button>
+        <button>◕<small>免提</small></button>
+      </div>
+      <button class="hangup" data-go="review">☎<small>挂断</small></button>
+    </section>
+
+    <section class="screen video-screen" data-screen="video">
+      <div class="status"><b>10:28</b><span>▮▮▮  WiFi  ▱</span></div>
+      <div class="video-title"><p>00:28</p><h2>快递客服</h2><span>通话中</span></div>
+      <img class="agent" src="./assets/agent-video.png" alt="">
+      <div class="side-wave"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="video-actions">
+        <button>♩<small>静音</small></button>
+        <button class="hangup" data-go="review">☎<small>挂断</small></button>
+        <button>▣<small>摄像头</small></button>
+      </div>
+      <div class="warm-tip"><img src="./assets/shield.png" alt=""><p><b>温馨提示</b><br>客服不会要求您提供银行卡密码、短信验证码等敏感信息，请谨防诈骗。</p></div>
+    </section>
+
+    <section class="screen review-screen" data-screen="review">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <h2 class="page-title">挑战结束</h2>
+      <img class="score-badge" src="./assets/score-badge.png" alt="88分 优秀">
+      <p class="summary">表现很棒！你识别出了大部分诈骗套路，继续保持警惕，避免落入陷阱！</p>
+      <article class="analysis-card">
+        <h3><span class="ok">✓</span>正确应对</h3>
+        <p><span>✓</span> 没有透露个人信息和验证码</p>
+        <p><span>✓</span> 没有点击不明链接</p>
+        <p><span>✓</span> 对异常情况保持了警惕</p>
+        <hr>
+        <h3><span class="warn">!</span>风险提醒</h3>
+        <p><i>•</i> 对方要求提供过多信息时存在犹豫</p>
+      </article>
+      <div class="bottom-actions">
+        <button class="primary" data-go="chat">重新挑战</button>
+        <button class="outline" data-go="home">换个场景</button>
+      </div>
+      <button class="detail-link" data-go="detail">查看复盘详情</button>
+    </section>
+
+    <section class="screen detail-screen" data-screen="detail">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <header class="simple-head"><button class="icon-btn" data-go="review">‹</button><h2>复盘详情展开</h2></header>
+      <div class="glass-panel">
+        <div class="tabs"><b>复盘分析</b><span>对话记录</span></div>
+        <article>
+          <h3><span class="warn">!</span>风险探析分析</h3>
+          <p>你在第4轮中存在风险行为，可能导致个人信息泄露或财产损失。</p>
+          <div class="inner-card"><b>第4轮</b><span>诈骗套路</span><p>诱导点击不明链接，套取个人信息</p><em>你的回答：</em><p>“好的，我点一下看看”</p><em>风险点：</em><p>点击未知链接可能导致银行卡被盗刷等财产损失。</p></div>
+        </article>
+        <article>
+          <h3><span class="ok">✓</span>正确应对分析</h3>
+          <div class="inner-card"><b>第6轮</b><span>你的回复：</span><p>“我需要先核实一下快递单号和物流信息。”</p><em class="green-text">分析：</em><p>正确核实信息，避免了被骗风险。</p></div>
+        </article>
+        <article>
+          <h3><span class="blue-dot">★</span>总结与建议</h3>
+          <ul><li>遇到陌生链接，务必谨慎点击；</li><li>涉及个人信息，先核实再操作；</li><li>保持警惕，保护好个人信息与财产安全。</li></ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="screen history-screen" data-screen="history">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <h1>历史记录</h1>
+      <p>仅保留最近3次挑战记录</p>
+      <div class="history-list">
+        <button data-go="review"><img src="./assets/scene-delivery.png" alt=""><b>快递理赔诈骗<small>文字模式</small></b><strong>88<span>分</span></strong><time>2024-05-20 10:21</time></button>
+        <button data-go="review"><img src="./assets/scene-family.png" alt=""><b>AI冒充亲友借钱<small>电话模式</small></b><strong>72<span>分</span></strong><time>2024-05-19 16:43</time></button>
+        <button data-go="review"><img src="./assets/scene-job.png" alt=""><b>AI兼职刷单诈骗<small>文字模式</small></b><strong>91<span>分</span></strong><time>2024-05-18 09:16</time></button>
+      </div>
+      <nav class="tabbar">
+        <button class="tab" data-go="home"><span class="nav-icon nav-home"></span>首页</button>
+        <button class="tab active" data-go="history"><span class="nav-icon nav-clock"></span>历史记录</button>
+        <button class="tab" data-go="profile"><span class="nav-icon nav-user"></span>我的</button>
+      </nav>
+    </section>
+
+    <section class="screen profile-screen" data-screen="profile">
+      <div class="status"><b>9:41</b><span>▮▮▮  WiFi  ▱</span></div>
+      <header class="profile-top"><img src="./assets/profile-avatar.png" alt=""><div><h1>反诈小卫士</h1><p>练就火眼金睛，守护财产安全</p><p>当前等级：<b>Lv.2</b></p></div><span class="profile-badge"></span></header>
+      <div class="menu-card">
+        <button><span class="menu-icon icon-medal"></span>我的成就 <i>›</i></button>
+        <button><span class="menu-icon icon-guide"></span>使用说明 <i>›</i></button>
+        <button><span class="menu-icon icon-help"></span>常见问题 <i>›</i></button>
+        <button><span class="menu-icon icon-share"></span>分享给朋友 <i>›</i></button>
+        <button><span class="menu-icon icon-info"></span>关于我们 <i>›</i></button>
+      </div>
+      <button class="clear">清除本地记录</button>
+      <nav class="tabbar">
+        <button class="tab" data-go="home"><span class="nav-icon nav-home"></span>首页</button>
+        <button class="tab" data-go="history"><span class="nav-icon nav-clock"></span>历史记录</button>
+        <button class="tab active" data-go="profile"><span class="nav-icon nav-user"></span>我的</button>
+      </nav>
+    </section>
+
+    <div class="modal" id="modeModal" aria-hidden="true">
+      <div class="modal-card">
+        <button class="close" id="closeModal">×</button>
+        <h2>请选择体验方式</h2>
+        <p>不同模式，不同体验</p>
+        <label class="mode active"><span class="bubble">•••</span><b>文字聊天模式<small>推荐新手，轻松上手</small></b><input type="radio" name="mode" value="chat" checked></label>
+        <label class="mode"><span class="phone">☎</span><b>电话通话模式<small>沉浸式体验，指挥前机</small></b><input type="radio" name="mode" value="phone"></label>
+        <label class="mode muted"><span>▣</span><b>视频通话模式<small>接触面更广，更加真实</small></b><em>开发中</em><input type="radio" name="mode" value="video"></label>
+        <label class="check"><input type="checkbox" checked> 不再提醒</label>
+        <div class="modal-actions"><button class="ghost" id="cancelModal">取消</button><button class="primary" id="startMode">开始体验</button></div>
+      </div>
+    </div>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>
