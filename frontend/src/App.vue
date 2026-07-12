@@ -553,7 +553,8 @@ async function startSpeechInput() {
         return
       }
       autoRetryCount = 0
-      const result = await transcribeAudio(currentSceneId.value, audioBase64)
+      const asrMimeType = recordPcm16._lastMimeType || 'audio/L16;rate=16000'
+      const result = await transcribeAudio(currentSceneId.value, audioBase64, asrMimeType)
       const text = result?.text?.trim()
       if (text) {
         await handleSend(text)
@@ -703,14 +704,19 @@ async function recordPcm16(durationMs = 6000) {
   try {
     audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
   } catch {
-    // decodeAudioData failed - try raw approach
+    // decodeAudioData failed (common on mobile) - send raw audio to backend
+    // Backend will use ffmpeg to convert
     await audioContext.close()
-    return ''
+    const rawBase64 = arrayBufferToBase64(arrayBuffer)
+    // Store mimeType for the caller to use
+    recordPcm16._lastMimeType = mimeType
+    return rawBase64
   }
   await audioContext.close()
 
   const rawData = audioBuffer.getChannelData(0)
   const pcm16 = encodePcm16(downsample(rawData, audioBuffer.sampleRate, 16000))
+  recordPcm16._lastMimeType = 'audio/L16;rate=16000'
   return arrayBufferToBase64(pcm16)
 }
 

@@ -288,11 +288,62 @@ async def _xfyun_tts(scene_id: str, text: str, gender: str) -> bytes:
 async def _xfyun_asr(audio: bytes, mime_type: str) -> str:
     endpoint = _env("XFYUN_ASR_ENDPOINT", "wss://iat.cn-huabei-1.xf-yun.com/v1")
     protocol = os.getenv("XFYUN_ASR_PROTOCOL", "v1" if "/v1" in endpoint else "v2").lower()
-    if "audio/l16" not in mime_type.lower() and "pcm" not in mime_type.lower():
-        raise XfyunError("xfyun_asr_requires_pcm16")
+    
+    # Convert non-PCM audio to PCM16 using ffmpeg if needed
+    if "audio/l16" not in mime_type.lower() and "pcm" not in mime_type.lower() and "raw" not in mime_type.lower():
+        audio = await _convert_to_pcm16(audio, mime_type)
+    
     if protocol == "v2":
         return await _xfyun_asr_v2(endpoint, audio)
     return await _xfyun_asr_v1(endpoint, audio)
+
+
+async def _convert_to_pcm16(audio: bytes, mime_type: str) -> bytes:
+    """Convert audio from any format to PCM16 16kHz mono using ffmpeg."""
+    import subprocess
+    import tempfile
+    
+    # Determine input format
+    ext = ".webm"
+    if "mp4" in mime_type:
+        ext = ".mp4"
+    elif "ogg" in mime_type:
+        ext = ".ogg"
+    elif "mp3" in mime_type or "mpeg" in mime_type:
+        ext = ".mp3"
+    
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as inf:
+        inf.write(audio)
+        in_path = inf.name
+    
+    out_path = in_path + ".pcm"
+    
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", in_path,
+            "-f", "s16le", "-acodec", "pcm_s16le",
+            "-ar", "16000", "-ac", "1",
+            out_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await asyncio.wait_for(proc.wait(), timeout=10)
+        
+        if proc.returncode != 0:
+            raise XfyunError("ffmpeg_conversion_failed")
+        
+        with open(out_path, "rb") as f:
+            return f.read()
+    finally:
+        import os as _os
+        try:
+            _os.unlink(in_path)
+        except OSError:
+            pass
+        try:
+            _os.unlink(out_path)
+        except OSError:
+            pass
 
 
 async def _xfyun_asr_v1(endpoint: str, audio: bytes) -> str:
