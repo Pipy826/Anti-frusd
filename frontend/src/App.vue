@@ -204,6 +204,7 @@ let ringContext = null
 let ringOscillator = null
 let ttsAudio = null
 let phonePlayer = null
+let autoRetryCount = 0
 
 const currentScene = computed(() => scenes.value.find((scene) => scene.id === currentSceneId.value) || scenes.value[0] || getFallbackScene(currentSceneId.value))
 const browserAsrSupported = computed(() => {
@@ -534,20 +535,24 @@ async function startSpeechInput() {
     callState.value = '识别中'
     try {
       const audioBase64 = await recordPcm16(8000)
-      // If no speech detected, silently restart listening in auto mode
+      // If no speech detected, silently restart listening in auto mode (max 3 retries)
       if (!audioBase64) {
         if (screen.value === 'call') {
           callState.value = '通话中'
-          if (autoListenMode.value && !chatLoading.value) {
+          autoRetryCount++
+          if (autoListenMode.value && !chatLoading.value && autoRetryCount < 3) {
             setTimeout(() => {
               if (callState.value === '通话中' && screen.value === 'call') {
                 startSpeechInput()
               }
-            }, 300)
+            }, 500)
+          } else {
+            autoRetryCount = 0
           }
         }
         return
       }
+      autoRetryCount = 0
       const result = await transcribeAudio(currentSceneId.value, audioBase64)
       const text = result?.text?.trim()
       if (text) {
@@ -560,7 +565,7 @@ async function startSpeechInput() {
             if (callState.value === '通话中' && screen.value === 'call') {
               startSpeechInput()
             }
-          }, 300)
+          }, 500)
           return
         }
         chatError.value = result?.degraded ? '语音识别暂不可用，请改用文字回复。' : '没有听清，请再说一遍。'
@@ -601,9 +606,10 @@ async function recordPcm16(durationMs = 8000) {
   const chunks = []
 
   // VAD (Voice Activity Detection) parameters
-  const SILENCE_THRESHOLD = 0.015    // amplitude below this is silence
-  const SILENCE_DURATION = 1200      // ms of silence before stopping
-  const MIN_RECORD_TIME = 800        // minimum recording time (ms)
+  const SILENCE_THRESHOLD = 0.008    // lower threshold for mobile
+  const SILENCE_DURATION = 1500      // ms of silence before stopping
+  const MIN_RECORD_TIME = 1000       // minimum recording time (ms)
+  const MAX_RECORD_TIME = durationMs // hard limit
   let silenceStart = 0
   let hasSpeech = false
   let recordStart = Date.now()
@@ -622,6 +628,12 @@ async function recordPcm16(durationMs = 8000) {
     const rms = Math.sqrt(sum / data.length)
     const elapsed = Date.now() - recordStart
 
+    // Hard time limit
+    if (elapsed >= MAX_RECORD_TIME) {
+      stopped = true
+      return
+    }
+
     if (rms > SILENCE_THRESHOLD) {
       hasSpeech = true
       silenceStart = 0
@@ -629,7 +641,6 @@ async function recordPcm16(durationMs = 8000) {
       if (!silenceStart) {
         silenceStart = Date.now()
       } else if (Date.now() - silenceStart > SILENCE_DURATION) {
-        // User stopped speaking
         stopped = true
       }
     }
@@ -641,7 +652,8 @@ async function recordPcm16(durationMs = 8000) {
   // Wait for either silence detection or max duration
   await new Promise((resolve) => {
     const checkInterval = setInterval(() => {
-      if (stopped || Date.now() - recordStart >= durationMs) {
+      if (stopped || Date.now() - recordStart >= MAX_RECORD_TIME) {
+        stopped = true
         clearInterval(checkInterval)
         resolve()
       }
@@ -653,8 +665,8 @@ async function recordPcm16(durationMs = 8000) {
   stream.getTracks().forEach((track) => track.stop())
   await audioContext.close()
 
-  // If no speech detected at all, return empty to avoid sending noise
-  if (!hasSpeech) return ''
+  // If too short or no speech, return empty
+  if (!hasSpeech || chunks.length < 3) return ''
 
   const merged = mergeFloat32(chunks)
   const pcm16 = encodePcm16(downsample(merged, audioContext.sampleRate, 16000))
