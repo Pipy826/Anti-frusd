@@ -33,6 +33,22 @@
         @click="handleQuickReply(reply)"
       >{{ reply }}</button>
     </div>
+
+    <!-- Text input for fallback -->
+    <div v-if="showTextInput" class="call-text-input call-slide-up">
+      <form @submit.prevent="handleTextSubmit">
+        <input
+          ref="textInputRef"
+          v-model="textInput"
+          type="text"
+          placeholder="输入文字回复..."
+          :disabled="loading || state === '播报中'"
+          enterkeyhint="send"
+        />
+        <button type="submit" :disabled="!textInput.trim() || loading || state === '播报中'">发送</button>
+      </form>
+    </div>
+
     <p v-if="error" class="inline-error">{{ error }}</p>
 
     <!-- Tool buttons with dynamic states -->
@@ -64,6 +80,12 @@
         </span>
         <small>快捷回复</small>
       </button>
+      <button class="tool-btn" :class="{ 'tool-active-green': showTextInput }" @click="toggleTextInput">
+        <span class="tool-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M6 16h12"/></svg>
+        </span>
+        <small>键盘</small>
+      </button>
     </div>
     <button class="hangup call-hangup-pulse" @click="$emit('hangup')">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
@@ -90,6 +112,9 @@ const emit = defineEmits(['back', 'send', 'listen', 'hangup', 'toggle-auto-liste
 const lastSent = ref('')
 const autoListenEnabled = ref(props.autoListen)
 const showQuickPanel = ref(true)
+const showTextInput = ref(false)
+const textInput = ref('')
+const textInputRef = ref(null)
 
 const stateBadgeClass = computed(() => {
   switch (props.state) {
@@ -122,6 +147,20 @@ function handleListen() {
 function toggleAutoListen() {
   autoListenEnabled.value = !autoListenEnabled.value
   emit('toggle-auto-listen', autoListenEnabled.value)
+}
+
+function toggleTextInput() {
+  showTextInput.value = !showTextInput.value
+  if (showTextInput.value) {
+    setTimeout(() => textInputRef.value?.focus(), 100)
+  }
+}
+
+function handleTextSubmit() {
+  const text = textInput.value.trim()
+  if (!text || props.loading || props.state === '播报中') return
+  emit('send', text)
+  textInput.value = ''
 }
 
 // Watch for state changes: auto-listen after AI finishes speaking
@@ -256,6 +295,47 @@ watch(() => props.state, (newState, oldState) => {
 /* Quick reply button active state */
 .call-quick button {
   transition: all 0.2s ease;
+}
+
+/* Text input area */
+.call-text-input {
+  padding: 0 20px;
+  margin: 8px 0;
+}
+.call-text-input form {
+  display: flex;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  padding: 4px 4px 4px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.call-text-input input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 14px;
+  min-width: 0;
+}
+.call-text-input input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+.call-text-input button {
+  background: var(--blue, #2196f3);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.call-text-input button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .call-quick button:active:not(:disabled) {
   transform: scale(0.93);
