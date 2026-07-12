@@ -1,115 +1,164 @@
 # ============================================================
-# Anti-fraud 一键部署脚本 (PowerShell)
-# 
-# 使用方式: 右键此文件 -> "使用 PowerShell 运行"
-# 或在终端中: powershell -ExecutionPolicy Bypass -File deploy.ps1
+# Anti-fraud One-Click Deploy (PowerShell)
+# Usage: powershell -ExecutionPolicy Bypass -File deploy.ps1
 # ============================================================
 
-$ErrorActionPreference = "Stop"
 $SERVER = "8.139.255.130"
 $USER = "root"
-$PASS = "T8y2x62006"
 $REMOTE_DIR = "/opt/anti-fraud"
 
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Anti-fraud 一键部署" -ForegroundColor Cyan
-Write-Host "  目标服务器: $SERVER" -ForegroundColor Cyan
+Write-Host "  Anti-fraud Deploy" -ForegroundColor Cyan
+Write-Host "  Server: $SERVER" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ─── 检查并安装 sshpass 替代方案 ────────────────────────────
-# Windows 下使用 ssh + 自动输入密码的方式
+# Check backend\.env exists
+if (-not (Test-Path "backend\.env")) {
+    Write-Host "[FAIL] backend\.env not found!" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit 1
+}
 
-# 生成 SSH Key（如果不存在）
+# Read public key
 $sshKeyPath = "$env:USERPROFILE\.ssh\id_rsa"
 if (-not (Test-Path "$sshKeyPath.pub")) {
-    Write-Host "[1/6] 生成 SSH 密钥..." -ForegroundColor Yellow
-    ssh-keygen -t rsa -b 4096 -f $sshKeyPath -N '""' -q
-    Write-Host "[OK] SSH 密钥已生成" -ForegroundColor Green
-} else {
-    Write-Host "[1/6] SSH 密钥已存在" -ForegroundColor Green
-}
-
-# 读取公钥
-$pubKey = Get-Content "$sshKeyPath.pub" -Raw
-
-Write-Host ""
-Write-Host "─────────────────────────────────────────────" -ForegroundColor DarkGray
-Write-Host "  接下来需要输入服务器密码（共需3次）" -ForegroundColor Yellow
-Write-Host "  密码: $PASS" -ForegroundColor Yellow  
-Write-Host "─────────────────────────────────────────────" -ForegroundColor DarkGray
-Write-Host ""
-
-# ─── 配置免密登录 ───────────────────────────────────────────
-Write-Host "[2/6] 配置 SSH 免密登录（输入密码）..." -ForegroundColor Yellow
-$pubKeyTrimmed = $pubKey.Trim()
-ssh -o StrictHostKeyChecking=no "${USER}@${SERVER}" "mkdir -p ~/.ssh && echo '$pubKeyTrimmed' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo 'SSH_KEY_OK'"
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[x] SSH 连接失败，请检查密码和网络" -ForegroundColor Red
-    Read-Host "按回车退出"
+    Write-Host "[FAIL] SSH key not found. Run: ssh-keygen -t rsa -N ''" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
     exit 1
 }
-Write-Host "[OK] 免密登录配置完成（后续无需再输入密码）" -ForegroundColor Green
+$pubKey = (Get-Content "$sshKeyPath.pub" -Raw).Trim()
 
-# ─── 测试免密连接 ───────────────────────────────────────────
-Write-Host "[3/6] 验证免密连接..." -ForegroundColor Yellow
-$testResult = ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no "${USER}@${SERVER}" "echo connected" 2>&1
-if ($testResult -match "connected") {
-    Write-Host "[OK] 免密连接成功！" -ForegroundColor Green
-} else {
-    Write-Host "[!] 免密可能未生效，继续尝试..." -ForegroundColor Yellow
-}
+# Build a single remote script that does everything
+$envContent = (Get-Content "backend\.env" -Raw) -replace "'", "'\''"
+$serverScript = (Get-Content "server-setup.sh" -Raw) -replace "'", "'\''"
 
-# ─── 上传文件 ───────────────────────────────────────────────
-Write-Host "[4/6] 上传配置和脚本..." -ForegroundColor Yellow
+# Create a combined script to minimize SSH connections
+$remoteScript = @"
+#!/bin/bash
+set -e
 
-# 创建远程目录
-ssh -o StrictHostKeyChecking=no "${USER}@${SERVER}" "mkdir -p ${REMOTE_DIR}"
+# Setup SSH key
+mkdir -p ~/.ssh
+echo '$pubKey' >> ~/.ssh/authorized_keys
+sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
 
-# 上传 .env
-if (Test-Path "backend\.env") {
-    scp -o StrictHostKeyChecking=no "backend\.env" "${USER}@${SERVER}:${REMOTE_DIR}/.env"
-    Write-Host "  .env 已上传" -ForegroundColor Gray
-} else {
-    Write-Host "[x] backend\.env 不存在！请先配置" -ForegroundColor Red
-    Read-Host "按回车退出"
-    exit 1
-}
+# Create project dir and write .env
+mkdir -p $REMOTE_DIR
+cat > $REMOTE_DIR/.env << 'ENVEOF'
+$envContent
+ENVEOF
 
-# 上传部署脚本
-scp -o StrictHostKeyChecking=no "server-setup.sh" "${USER}@${SERVER}:${REMOTE_DIR}/server-setup.sh"
-Write-Host "  server-setup.sh 已上传" -ForegroundColor Gray
-Write-Host "[OK] 文件上传完成" -ForegroundColor Green
+# Add production fields if missing
+grep -q "FRONTEND_PORT" $REMOTE_DIR/.env || echo "FRONTEND_PORT=8080" >> $REMOTE_DIR/.env
+grep -q "JWT_SECRET" $REMOTE_DIR/.env || echo "JWT_SECRET=anti_fraud_prod_secret_2024_secure" >> $REMOTE_DIR/.env
+grep -q "JWT_EXPIRE_HOURS" $REMOTE_DIR/.env || echo "JWT_EXPIRE_HOURS=72" >> $REMOTE_DIR/.env
+grep -q "ADMIN_USERNAME" $REMOTE_DIR/.env || echo "ADMIN_USERNAME=admin" >> $REMOTE_DIR/.env
+grep -q "ADMIN_PASSWORD" $REMOTE_DIR/.env || echo "ADMIN_PASSWORD=admin123" >> $REMOTE_DIR/.env
 
-# ─── 执行远程部署 ───────────────────────────────────────────
+echo "ENV_READY"
+
+# Install Docker
+if ! command -v docker &> /dev/null; then
+    echo "Installing Docker..."
+    curl -fsSL https://get.docker.com | sh
+    systemctl enable docker
+    systemctl start docker
+fi
+
+# Install Docker Compose
+if ! docker compose version &> /dev/null; then
+    echo "Installing Docker Compose..."
+    apt-get update -qq && apt-get install -y -qq docker-compose-plugin
+fi
+
+# Install Git
+if ! command -v git &> /dev/null; then
+    apt-get update -qq && apt-get install -y -qq git
+fi
+
+echo "DEPS_READY"
+
+# Clone or update code
+if [ -d "$REMOTE_DIR/.git" ]; then
+    cd $REMOTE_DIR
+    git fetch origin main
+    git reset --hard origin/main
+else
+    rm -rf $REMOTE_DIR/.git
+    cd $REMOTE_DIR
+    git init
+    git remote add origin https://github.com/Pipy826/Anti-frusd.git
+    git fetch origin main
+    git reset --hard origin/main
+fi
+
+echo "CODE_READY"
+
+# Restore .env (git reset may have removed it)
+cat > $REMOTE_DIR/.env << 'ENVEOF2'
+$envContent
+ENVEOF2
+grep -q "FRONTEND_PORT" $REMOTE_DIR/.env || echo "FRONTEND_PORT=8080" >> $REMOTE_DIR/.env
+grep -q "JWT_SECRET" $REMOTE_DIR/.env || echo "JWT_SECRET=anti_fraud_prod_secret_2024_secure" >> $REMOTE_DIR/.env
+grep -q "JWT_EXPIRE_HOURS" $REMOTE_DIR/.env || echo "JWT_EXPIRE_HOURS=72" >> $REMOTE_DIR/.env
+grep -q "ADMIN_USERNAME" $REMOTE_DIR/.env || echo "ADMIN_USERNAME=admin" >> $REMOTE_DIR/.env
+grep -q "ADMIN_PASSWORD" $REMOTE_DIR/.env || echo "ADMIN_PASSWORD=admin123" >> $REMOTE_DIR/.env
+
+# Build and start
+cd $REMOTE_DIR
+docker compose down 2>/dev/null || true
+docker compose build
+docker compose up -d
+
+sleep 8
+echo ""
+echo "=== Container Status ==="
+docker compose ps
+echo ""
+echo "DEPLOY_DONE"
+echo "Access: http://8.139.255.130:8080"
+echo "Admin: admin / admin123"
+"@
+
+Write-Host "Connecting to server..." -ForegroundColor Yellow
+Write-Host "Enter password: T8y2x62006" -ForegroundColor Magenta
+Write-Host "(Only needed ONCE - after this, key-based auth is configured)" -ForegroundColor Gray
 Write-Host ""
-Write-Host "[5/6] 执行远程部署（首次约5-10分钟）..." -ForegroundColor Yellow
-Write-Host "─────────────────────────────────────────────" -ForegroundColor DarkGray
-Write-Host ""
 
-ssh -o StrictHostKeyChecking=no "${USER}@${SERVER}" "bash ${REMOTE_DIR}/server-setup.sh"
+# Write script to temp file and pipe it via SSH (single connection)
+$tempFile = [System.IO.Path]::GetTempFileName()
+$remoteScript | Set-Content -Path $tempFile -Encoding UTF8 -NoNewline
 
-if ($LASTEXITCODE -ne 0) {
+Get-Content $tempFile -Raw | ssh -o StrictHostKeyChecking=no "$USER@$SERVER" "bash -s"
+$exitCode = $LASTEXITCODE
+
+Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+
+if ($exitCode -ne 0) {
     Write-Host ""
-    Write-Host "[x] 部署过程出错，请查看上方日志" -ForegroundColor Red
-    Read-Host "按回车退出"
+    Write-Host "[FAIL] Deploy error. Check logs above." -ForegroundColor Red
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# ─── 完成 ────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "[6/6] 部署完成！" -ForegroundColor Green
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  访问地址: http://${SERVER}:8080" -ForegroundColor White
-Write-Host "  管理账号: admin" -ForegroundColor White
-Write-Host "  管理密码: admin123" -ForegroundColor White
-Write-Host "" 
-Write-Host "  阿里云安全组请放行 8080 端口" -ForegroundColor Yellow
+Write-Host "  DEPLOY COMPLETE!" -ForegroundColor Green
 Write-Host ""
-Write-Host "  后续更新只需再次运行此脚本即可" -ForegroundColor Gray
+Write-Host "  HTTP:  http://${SERVER}:8080" -ForegroundColor White
+Write-Host "  HTTPS: https://${SERVER}:8443 (mobile)" -ForegroundColor White
+Write-Host "  Admin: admin / admin123" -ForegroundColor White
+Write-Host ""
+Write-Host "  Open port 8080 AND 8443 in Alibaba Cloud" -ForegroundColor Yellow
+Write-Host "  Mobile: use HTTPS for microphone access" -ForegroundColor Yellow
+Write-Host "  First visit shows cert warning - tap Advanced" -ForegroundColor Gray
+Write-Host "  Re-run this script anytime to update." -ForegroundColor Gray
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
-Read-Host "按回车退出"
+Read-Host "Press Enter to exit"

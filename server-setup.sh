@@ -98,6 +98,24 @@ grep -q "JWT_EXPIRE_HOURS" ${REMOTE_DIR}/.env || echo -e "\nJWT_EXPIRE_HOURS=72"
 grep -q "ADMIN_USERNAME" ${REMOTE_DIR}/.env || echo -e "\nADMIN_USERNAME=admin" >> ${REMOTE_DIR}/.env
 grep -q "ADMIN_PASSWORD" ${REMOTE_DIR}/.env || echo -e "\nADMIN_PASSWORD=admin123" >> ${REMOTE_DIR}/.env
 
+# ─── 6.5 生成自签名 SSL 证书（用于 HTTPS）──────────────────
+SSL_DIR="${REMOTE_DIR}/ssl"
+if [ ! -f "${SSL_DIR}/server.crt" ]; then
+    warn "生成自签名 SSL 证书..."
+    mkdir -p ${SSL_DIR}
+    openssl req -x509 -nodes -days 3650 \
+        -newkey rsa:2048 \
+        -keyout ${SSL_DIR}/server.key \
+        -out ${SSL_DIR}/server.crt \
+        -subj "/C=CN/ST=China/L=Beijing/O=AntiFraud/CN=8.139.255.130" \
+        -addext "subjectAltName=IP:8.139.255.130" \
+        2>/dev/null
+    chmod 600 ${SSL_DIR}/server.key
+    log "SSL 证书生成完成（有效期10年）"
+else
+    log "SSL 证书已存在"
+fi
+
 # ─── 7. 构建并启动服务 ──────────────────────────────────────
 log "停止旧服务..."
 docker compose down 2>/dev/null || true
@@ -146,11 +164,16 @@ echo ""
 echo "============================================"
 echo -e "  ${GREEN}部署完成！${NC}"
 echo ""
-echo "  访问地址: http://8.139.255.130:8080"
+echo "  HTTP  访问: http://8.139.255.130:8080"
+echo "  HTTPS 访问: https://8.139.255.130:8443"
+echo "  (手机请用 HTTPS 地址以启用麦克风)"
+echo ""
 echo "  管理账号: admin"
 echo "  管理密码: admin123"
 echo ""
-echo "  ⚠ 阿里云用户请确认安全组已放行 8080 端口"
+echo "  ⚠ 阿里云用户请确认安全组已放行 8080 和 8443 端口"
+echo "  ⚠ 首次用 HTTPS 访问时浏览器会提示证书不受信任"
+echo "    点击「高级」→「继续访问」即可"
 echo ""
 echo "  运维命令:"
 echo "    查看日志:  cd /opt/anti-fraud && docker compose logs -f"
