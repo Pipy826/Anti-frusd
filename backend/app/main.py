@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载 .env 文件（位于 backend/ 目录下）
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path, override=True)
+
+import json
+import re
 import time
 import uuid
 import zipfile
@@ -19,10 +29,12 @@ from .database import (
     from_json,
     get_active_prompt,
     get_scene,
+    get_user_settings,
     init_db,
     list_cognitive_questions,
     list_scenes,
     now_ts,
+    set_user_settings,
     to_json,
 )
 from .llm import chat_with_failover, model_status
@@ -55,8 +67,20 @@ from .models import (
     TTSResponse,
     VoiceConfig,
 )
-from .safety import assess_user_risk, audit_input, audit_output, mask_sensitive_info
-from .voice import get_voice_config, synthesize_speech, transcribe_audio
+from .safety import RiskAssessment, assess_user_risk, audit_input, audit_output, mask_sensitive_info
+from .voice import get_voice_config, synthesize_speech, transcribe_audio, async_synthesize_speech, async_transcribe_audio
+from .auth import (
+    AuthResponse,
+    LoginRequest,
+    RegisterRequest,
+    UserInfo,
+    get_current_user,
+    init_users_table,
+    login_user,
+    register_user,
+    require_admin,
+    require_auth,
+)
 
 
 MAX_MESSAGES = 20
@@ -69,6 +93,7 @@ RATE_LIMIT_PER_SESSION = 24
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    init_users_table()
     yield
 
 
@@ -79,6 +104,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def admin_auth_guard(request: Request, call_next):
+    """保护 /api/admin/* 路由，要求管理员 JWT token。"""
+    if request.url.path.startswith("/api/admin"):
+        try:
+            require_admin(request)
+        except HTTPException as exc:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -114,6 +151,28 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok", active_sessions=active_sessions, total_sessions=total_sessions, db_path=str(DB_PATH))
 
 
+# ─── Auth Routes ─────────────────────────────────────────────────
+
+@app.post("/api/auth/register", response_model=AuthResponse)
+def api_register(payload: RegisterRequest) -> AuthResponse:
+    return register_user(payload)
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+def api_login(payload: LoginRequest) -> AuthResponse:
+    return login_user(payload)
+
+
+@app.get("/api/auth/me", response_model=UserInfo)
+def api_me(request: Request) -> UserInfo:
+    user = require_auth(request)
+    from .auth import get_user_info
+    info = get_user_info(int(user["sub"]))
+    if not info:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return info
+
+
 @app.get("/api/scenes", response_model=list[SceneResponse])
 def scenes(request: Request) -> list[SceneResponse]:
     return [scene_to_response(scene) for scene in list_scenes(tenant_id=tenant_id(request))]
@@ -147,19 +206,19 @@ def voice_config(scene_id: str, request: Request) -> VoiceConfig:
 
 
 @app.post("/api/voice/tts", response_model=TTSResponse)
-def voice_tts(payload: TTSRequest, request: Request) -> TTSResponse:
+async def voice_tts(payload: TTSRequest, request: Request) -> TTSResponse:
     scene = get_scene(payload.scene_id, tenant_id=tenant_id(request))
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在或已下线")
-    return synthesize_speech(payload.scene_id, payload.text)
+    return await async_synthesize_speech(payload.scene_id, payload.text)
 
 
 @app.post("/api/voice/asr", response_model=ASRResponse)
-def voice_asr(payload: ASRRequest, request: Request) -> ASRResponse:
+async def voice_asr(payload: ASRRequest, request: Request) -> ASRResponse:
     scene = get_scene(payload.scene_id, tenant_id=tenant_id(request))
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在或已下线")
-    return transcribe_audio(payload.scene_id, payload.audioBase64, payload.mimeType)
+    return await async_transcribe_audio(payload.scene_id, payload.audioBase64, payload.mimeType)
 
 
 @app.put("/api/admin/brand", response_model=BrandSettings)
@@ -200,14 +259,18 @@ def update_brand(payload: BrandSettings, request: Request) -> BrandSettings:
 @app.get("/api/admin/dashboard", response_model=DashboardStats)
 def dashboard(request: Request) -> DashboardStats:
     today_start = int(time.time() // 86400 * 86400)
+    yesterday_start = today_start - 86400
     current_tenant = tenant_id(request)
     with connect() as conn:
         total_sessions = conn.execute("SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ?", (current_tenant,)).fetchone()["total"]
         today_active = conn.execute("SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ? AND created_at >= ?", (current_tenant, today_start)).fetchone()["total"]
+        yesterday_active = conn.execute("SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ? AND created_at >= ? AND created_at < ?", (current_tenant, yesterday_start, today_start)).fetchone()["total"]
+        yesterday_total = conn.execute("SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ? AND created_at < ?", (current_tenant, today_start)).fetchone()["total"]
         avg_row = conn.execute("SELECT AVG(score) AS avg_score FROM sessions WHERE tenant_id = ? AND score IS NOT NULL", (current_tenant,)).fetchone()
+        yesterday_avg_row = conn.execute("SELECT AVG(score) AS avg_score FROM sessions WHERE tenant_id = ? AND score IS NOT NULL AND created_at < ?", (current_tenant, today_start)).fetchone()
         rank_rows = conn.execute(
             """
-            SELECT c.title, COUNT(*) AS total
+            SELECT c.title, COUNT(*) AS total, c.image
             FROM sessions s JOIN scenes c ON c.id = s.scene_id
             WHERE s.tenant_id = ?
             GROUP BY c.title
@@ -220,6 +283,10 @@ def dashboard(request: Request) -> DashboardStats:
             "SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ? AND (risk_privacy >= 40 OR risk_property >= 40)",
             (current_tenant,),
         ).fetchone()["total"]
+        yesterday_high_risk = conn.execute(
+            "SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ? AND (risk_privacy >= 40 OR risk_property >= 40) AND created_at < ?",
+            (current_tenant, today_start),
+        ).fetchone()["total"]
         review_rows = conn.execute("SELECT review_json FROM sessions WHERE tenant_id = ? AND review_json IS NOT NULL", (current_tenant,)).fetchall()
         cognitive_row = conn.execute("SELECT SUM(total) AS total, SUM(wrong) AS wrong FROM cognitive_attempts WHERE tenant_id = ?", (current_tenant,)).fetchone()
     dimensions: dict[str, list[float]] = {}
@@ -228,14 +295,20 @@ def dashboard(request: Request) -> DashboardStats:
         for key, value in review.get("dimensions", {}).items():
             dimensions.setdefault(key, []).append(float(value))
     average_dimensions = {key: round(sum(values) / len(values), 1) for key, values in dimensions.items() if values}
+    high_risk_trigger_rate = round(high_risk_count * 100 / max(1, total_sessions), 1)
+    yesterday_high_risk_rate = round(yesterday_high_risk * 100 / max(1, yesterday_total), 1) if yesterday_total else 0
     return DashboardStats(
         totalSessions=total_sessions,
         todayActive=today_active,
+        yesterdayActive=yesterday_active,
+        yesterdayTotal=yesterday_total,
         averageScore=round(float(avg_row["avg_score"] or 0), 1),
-        sceneRank=[{"title": row["title"], "total": row["total"]} for row in rank_rows],
+        yesterdayAverageScore=round(float(yesterday_avg_row["avg_score"] or 0), 1),
+        sceneRank=[{"title": row["title"], "total": row["total"], "image": row["image"] or ""} for row in rank_rows],
         highRiskCount=high_risk_count,
         cognitiveErrorRate=round(float(cognitive_row["wrong"] or 0) * 100 / max(1, int(cognitive_row["total"] or 0)), 1),
-        highRiskTriggerRate=round(high_risk_count * 100 / max(1, total_sessions), 1),
+        highRiskTriggerRate=high_risk_trigger_rate,
+        yesterdayHighRiskRate=yesterday_high_risk_rate,
         averageDimensions=average_dimensions,
     )
 
@@ -273,6 +346,47 @@ def admin_metrics(request: Request) -> dict[str, Any]:
         "activeSessions": active_sessions,
         "modelStatus": model_status(),
     }
+
+
+@app.get("/api/admin/users")
+def admin_users(request: Request) -> list[dict[str, Any]]:
+    """获取平台所有注册用户及其训练统计。"""
+    today_start = int(time.time() // 86400 * 86400)
+    with connect() as conn:
+        users = conn.execute(
+            "SELECT id, username, nickname, role, avatar, created_at FROM users ORDER BY created_at DESC"
+        ).fetchall()
+        result = []
+        for user in users:
+            # 获取该用户的训练统计（通过 user_id 关联）
+            stats = conn.execute(
+                """
+                SELECT COUNT(*) as total_sessions,
+                       AVG(score) as avg_score,
+                       MAX(created_at) as last_active,
+                       SUM(CASE WHEN risk_privacy >= 40 OR risk_property >= 40 THEN 1 ELSE 0 END) as high_risk
+                FROM sessions WHERE user_id = ? AND status = 'ended'
+                """,
+                (user["id"],),
+            ).fetchone()
+            today_count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM sessions WHERE user_id = ? AND created_at >= ?",
+                (user["id"], today_start),
+            ).fetchone()["cnt"]
+            result.append({
+                "id": user["id"],
+                "username": user["username"],
+                "nickname": user["nickname"],
+                "role": user["role"],
+                "avatar": user["avatar"],
+                "totalSessions": int(stats["total_sessions"] or 0),
+                "avgScore": round(float(stats["avg_score"] or 0), 1),
+                "highRisk": int(stats["high_risk"] or 0),
+                "lastActive": iso_time(stats["last_active"]) if stats["last_active"] else "",
+                "todayActive": today_count > 0,
+                "createdAt": iso_time(user["created_at"]),
+            })
+    return result
 
 
 @app.post("/api/cognitive/submit", response_model=CognitiveSubmitResponse)
@@ -443,8 +557,10 @@ def conversations(request: Request, limit: int = 50, keyword: str = "", scene_id
         params.append(f"%{keyword}%")
     params.append(limit)
     query = f"""
-        SELECT s.*, c.title AS scene_title
-        FROM sessions s JOIN scenes c ON c.id = s.scene_id
+        SELECT s.*, c.title AS scene_title, u.nickname AS user_nickname, u.username AS user_username
+        FROM sessions s
+        JOIN scenes c ON c.id = s.scene_id
+        LEFT JOIN users u ON u.id = s.user_id
         WHERE {' AND '.join(filters)}
         ORDER BY s.created_at DESC
         LIMIT ?
@@ -461,7 +577,9 @@ def conversations(request: Request, limit: int = 50, keyword: str = "", scene_id
             status=row["status"],
             riskPrivacy=row["risk_privacy"],
             riskProperty=row["risk_property"],
+            duration=(row["ended_at"] - row["created_at"]) if row["ended_at"] else None,
             createdAt=iso_time(row["created_at"]),
+            userName=row["user_nickname"] or row["user_username"] or "匿名用户",
             messages=load_message_records(row["session_id"]),
         )
         for row in rows
@@ -579,13 +697,16 @@ def start_chat(payload: StartRequest, request: Request) -> StartResponse:
 
     timestamp = now_ts()
     session_id = uuid.uuid4().hex
+    # 获取当前登录用户 ID
+    current_user = get_current_user(request)
+    user_id = int(current_user["sub"]) if current_user else None
     with connect() as conn:
         conn.execute(
             """
             INSERT INTO sessions (
                 session_id, tenant_id, scene_id, mode, status, client_ip,
-                precheck_attempt_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+                precheck_attempt_id, user_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -594,6 +715,7 @@ def start_chat(payload: StartRequest, request: Request) -> StartResponse:
                 payload.mode,
                 client_ip(request),
                 payload.precheck_attempt_id or None,
+                user_id,
                 timestamp,
                 timestamp,
             ),
@@ -640,21 +762,28 @@ def send_chat(payload: SendRequest, request: Request) -> SendResponse:
     assessment = assess_user_risk(payload.user_message, scene)
     privacy_total = clamp(session["risk_privacy"] + assessment.privacy_delta)
     property_total = clamp(session["risk_property"] + assessment.property_delta)
-    timestamp = now_ts()
 
+    # Phase & intent tracking
+    current_phase = session.get("phase") or "trust_building"
+    intent_history = from_json(session.get("intent_history_json"), [])
+    intent_history.append(assessment.intent)
+    new_phase = advance_phase(current_phase, intent_history, visible_round, privacy_total, property_total)
+
+    timestamp = now_ts()
+    sanitized_user = mask_sensitive_info(payload.user_message)
     with connect() as conn:
         conn.execute(
             """
             INSERT INTO messages (
-                session_id, tenant_id, role, content, sanitized_content, round, risk_privacy_delta,
-                risk_property_delta, risk_reason, created_at
+                session_id, tenant_id, role, content, sanitized_content, round,
+                risk_privacy_delta, risk_property_delta, risk_reason, created_at
             ) VALUES (?, ?, 'user', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.session_id,
                 session["tenant_id"],
                 payload.user_message,
-                user_audit.sanitized_text,
+                sanitized_user,
                 visible_round,
                 assessment.privacy_delta,
                 assessment.property_delta,
@@ -663,60 +792,332 @@ def send_chat(payload: SendRequest, request: Request) -> SendResponse:
             ),
         )
         conn.execute(
-            "UPDATE sessions SET risk_privacy = ?, risk_property = ?, updated_at = ? WHERE session_id = ?",
-            (privacy_total, property_total, timestamp, payload.session_id),
+            """
+            UPDATE sessions
+            SET risk_privacy = ?, risk_property = ?, phase = ?, intent_history_json = ?, updated_at = ?
+            WHERE session_id = ?
+            """,
+            (privacy_total, property_total, new_phase, to_json(intent_history), timestamp, payload.session_id),
         )
 
-    messages = build_llm_messages(payload.session_id, scene)
-    result = chat_with_failover(messages)
-    reply = result.content
-    degraded = result.degraded or not result.ok
-    if not reply:
-        reply = realistic_fallback_reply(scene, payload.user_message, session["fallback_index"])
+    # Generate AI reply
+    llm_messages = build_llm_messages(payload.session_id, scene, new_phase, intent_history, privacy_total, property_total)
+    result = chat_with_failover(llm_messages)
+
+    if result.ok and result.content:
+        output_audit = audit_output(result.content)
+        ai_reply = output_audit.sanitized_text
+    else:
+        # Fallback reply
+        fallback_index = session.get("fallback_index", 0)
+        fallbacks = scene.get("fallback_replies", [])
+        ai_reply = fallbacks[fallback_index % len(fallbacks)] if fallbacks else "请稍等，我这边处理一下。"
         with connect() as conn:
             conn.execute(
-                "UPDATE sessions SET fallback_index = fallback_index + 1 WHERE session_id = ?",
-                (payload.session_id,),
+                "UPDATE sessions SET fallback_index = ? WHERE session_id = ?",
+                (fallback_index + 1, payload.session_id),
             )
 
-    output_audit = audit_output(reply)
-    ai_reply = output_audit.sanitized_text
-    if not output_audit.allowed:
-        degraded = True
+    # Extract role label
+    role_label, clean_reply = extract_role_label(ai_reply, scene)
+
+    # Store AI message
+    sanitized_ai = mask_sensitive_info(clean_reply)
     with connect() as conn:
         conn.execute(
             """
             INSERT INTO messages (
-                session_id, tenant_id, role, content, sanitized_content, round, model_provider,
-                degraded, created_at
+                session_id, tenant_id, role, content, sanitized_content, round,
+                model_provider, degraded, created_at
             ) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
             """,
-            (payload.session_id, session["tenant_id"], reply, ai_reply, visible_round + 1, result.provider, int(degraded), timestamp),
+            (
+                payload.session_id,
+                session["tenant_id"],
+                clean_reply,
+                sanitized_ai,
+                visible_round,
+                result.provider,
+                int(not result.ok),
+                timestamp,
+            ),
         )
-        conn.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", (timestamp, payload.session_id))
+
+    # Generate consequence alert
+    consequence_alert = generate_consequence_alert(assessment, scene, privacy_total, property_total)
+
+    # Quick replies for next turn
+    quick_replies = scene.get("quick_replies", [])
 
     log_event(
-        "chat_replied",
+        "chat_reply",
         session_id=payload.session_id,
         provider=result.provider,
-        degraded=degraded,
+        degraded=not result.ok,
+        phase=new_phase,
+        intent=assessment.intent,
         privacy=privacy_total,
         property=property_total,
     )
+
     return SendResponse(
-        ai_reply=ai_reply,
+        ai_reply=clean_reply,
         risk=RiskState(
             privacy=privacy_total,
             property=property_total,
             privacy_delta=assessment.privacy_delta,
             property_delta=assessment.property_delta,
             reason=assessment.reason,
-            warning=assessment.warning,
+            warning=consequence_alert,
         ),
-        quick_replies=suggest_quick_replies(scene, privacy_total, property_total),
-        degraded=degraded,
+        quick_replies=quick_replies,
+        degraded=not result.ok,
         provider=result.provider,
     )
+
+
+def build_llm_messages(session_id: str, scene: dict[str, Any], phase: str = "trust_building", intent_history: list[str] | None = None, privacy: int = 0, property_risk: int = 0) -> list[dict[str, str]]:
+    system_prompt = build_system_prompt(scene, phase, intent_history or [], privacy, property_risk)
+    messages = [{"role": "system", "content": system_prompt}]
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT role, sanitized_content
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY id
+            LIMIT ?
+            """,
+            (session_id, MAX_MESSAGES),
+        ).fetchall()
+    for row in rows:
+        role = "assistant" if row["role"] == "assistant" else "user"
+        messages.append({"role": role, "content": row["sanitized_content"]})
+    return messages
+
+
+def build_system_prompt(scene: dict[str, Any], phase: str = "trust_building", intent_history: list[str] | None = None, privacy: int = 0, property_risk: int = 0) -> str:
+    prompt = get_active_prompt(scene["id"])
+    role_prompt = prompt["system_prompt"] if prompt else scene["role"]
+    fallback_examples = "；".join(scene.get("fallback_replies", [])[:3])
+    consequences = "；".join(scene.get("branch_consequences", [])[:3])
+    intent_history = intent_history or []
+
+    # --- Phase-specific strategy (P0-1) ---
+    phase_instructions = PHASE_STRATEGY[phase]
+
+    # --- Dynamic difficulty based on user behavior (P0-2) ---
+    user_profile = build_user_profile(intent_history, privacy, property_risk)
+
+    # --- Cognitive bias techniques (P1-1) ---
+    cognitive_bias_guide = (
+        '在对话中自然运用以下心理技巧（不要说穿技巧名称）：\n'
+        '- 损失厌恶：暗示不行动会造成损失，如"退款通道即将关闭""名额有限"\n'
+        '- 社会认同：暗示他人已操作，如"其他客户都正常""群里大家都办了"\n'
+        '- 权威效应：强调机构身份或流程正式性，如"这是监管要求""系统自动触发"\n'
+        '- 承诺一致性：利用用户之前的配合，如"您刚才已确认身份，最后一步就好"\n'
+        '- 稀缺性：制造时间窗口，如"系统15分钟后自动失效""今天是最后期限"\n'
+        '根据当前阶段选择最合适的 1-2 种技巧。'
+    )
+
+    # --- Multimedia placeholder guidance (P1-1) ---
+    multimedia_guide = (
+        '如需引用图片、语音、视频、文件、链接等素材，用以下格式占位：\n'
+        '【语音消息 0:05】【图片：事故现场】【视频画面：本人正脸】【链接：理赔页面】【截图：转账记录】【文件：协议书.pdf】\n'
+        '这些占位描述应融入对话，增加真实感，如"我给你发段【语音消息 0:08】你听听是不是他""你看这个【截图：收益记录】"。'
+    )
+
+    # --- Multi-role support (P1-2) ---
+    multi_role_guide = (
+        '如果场景需要引入第二角色（主管、同事、系统客服等），使用格式：\n'
+        '（角色名）对话内容\n'
+        '例如：（风控主管）你好，我是张主管，工号8847，现在由我跟你确认一下情况。\n'
+        '角色切换应自然，如"我让我同事跟你说""转接到主管"。不要频繁切换，一次对话最多引入一个额外角色。'
+    )
+
+    return (
+        "你是反诈科普训练工具中的虚构对话角色。"
+        "目标是测试用户识别诈骗套路的能力，而不是教人实施违法行为。"
+        "禁止输出真实违法操作指引、真实支付链接、真实账号、真实个人信息。"
+        "不要生成可点击网址、二维码、银行卡号、收款码或具体转账路径；如需链接、图片、语音、视频、病历、事故现场等素材，只能用占位描述。"
+        "对话要像真实即时通讯或通话：短句、自然停顿、少解释，先用熟人/机构语气建立可信度，再逐步加入紧急、保密、同情、权威或限时压力。"
+        "不要一开始说穿诈骗目的；也不要机械重复同一句。根据用户反应推进对话。"
+        "为了真实感，可以偶尔加入生活化细节（正在开会、信号不好、老师催、医院窗口排队、班长统计、家属会担心等），但不要编造可被现实执行的真实机构、账号或链接。"
+        "每次回复控制在 35 到 150 字，最多提出一个动作要求。\n\n"
+        f"【当前场景】{scene['title']}。{role_prompt}\n\n"
+        f"【当前阶段】{phase}\n{phase_instructions}\n\n"
+        f"【用户画像】{user_profile}\n\n"
+        f"【心理技巧指导】\n{cognitive_bias_guide}\n\n"
+        f"【多媒体表达】\n{multimedia_guide}\n\n"
+        f"【多角色模拟】\n{multi_role_guide}\n\n"
+        f"【参考施压话术】{fallback_examples}\n"
+        f"【本场景风险后果】{consequences}"
+    )
+
+
+# ============================================================
+# Phase mechanism (P0-1)
+# ============================================================
+
+PHASE_STRATEGY: dict[str, str] = {
+    "trust_building": (
+        "当前处于【建立信任】阶段。\n"
+        "策略：用友善、专业的语气与用户交流。提供可信细节（如订单后四位、班级群名、工号等虚构信息）来增加角色可信度。\n"
+        "不要急于要求操作，先让用户放松警惕。可以主动提供一些'有用'信息来建立互动。\n"
+        "语气特征：平和、专业、乐于帮助。"
+    ),
+    "urgency_creation": (
+        "当前处于【制造紧迫】阶段。\n"
+        "策略：开始加入时间限制、后果威胁。暗示不立即行动会造成不可逆损失。\n"
+        "使用稀缺性和损失厌恶：'通道即将关闭''再不处理会影响征信''医生说必须马上交费'。\n"
+        "如果用户已经有了一定信任基础，可以提升紧迫程度。\n"
+        "语气特征：急切但仍然'为你着想'，偶尔表现出焦虑。"
+    ),
+    "action_induction": (
+        "当前处于【诱导行动】阶段。\n"
+        "策略：明确要求用户执行操作——转账、点击链接、报验证码、下载 App、共享屏幕等。\n"
+        "把操作描述得简单、安全、可逆：'只是确认一下身份''输完验证码就好了''先小额试一下'。\n"
+        "利用承诺一致性：'您刚才已经确认了信息，现在最后一步就完成了'。\n"
+        "语气特征：引导性强，步骤化指令，保持耐心。"
+    ),
+    "escape_blocking": (
+        "当前处于【堵截退路】阶段。\n"
+        "策略：用户已表现出犹豫或想要核实。不要放弃，但要巧妙回应：\n"
+        "- 用户想打电话核实 → '对方现在接不了电话''号码正在维护中'\n"
+        "- 用户想问别人 → '这件事比较敏感，先别跟别人说''等处理完再告诉家人'\n"
+        "- 用户明确拒绝或说要报警 → 降低施压，表现出理解，尝试用情感牌或'官方核验'的方式引回。如果用户非常坚定，可以缓和结束。\n"
+        "语气特征：理解但不轻易放弃，给出看似合理的解释。"
+    ),
+}
+
+
+def advance_phase(current_phase: str, intent_history: list[str], visible_round: int, privacy: int, property_risk: int) -> str:
+    """Determine the next conversation phase based on dialogue state."""
+    phases = ["trust_building", "urgency_creation", "action_induction", "escape_blocking"]
+    current_index = phases.index(current_phase) if current_phase in phases else 0
+
+    # Count recent intents
+    recent = intent_history[-3:] if len(intent_history) >= 3 else intent_history
+    verify_count = sum(1 for i in intent_history if i == "verify")
+    refuse_count = sum(1 for i in intent_history if i == "refuse")
+    comply_count = sum(1 for i in intent_history if i == "comply")
+
+    # Phase progression rules
+    if current_phase == "trust_building":
+        # Move to urgency after 2-3 rounds or if user seems comfortable
+        if visible_round >= 4 or comply_count >= 1:
+            return "urgency_creation"
+        if visible_round >= 3 and "question" in recent:
+            return "urgency_creation"
+    elif current_phase == "urgency_creation":
+        # Move to action if user shows compliance or after pressure
+        if comply_count >= 1 or visible_round >= 7:
+            return "action_induction"
+        # Jump to escape_blocking if user pushes back
+        if verify_count >= 2 or refuse_count >= 1:
+            return "escape_blocking"
+    elif current_phase == "action_induction":
+        # If user resists at action stage, switch to escape blocking
+        if verify_count >= 2 or refuse_count >= 1:
+            return "escape_blocking"
+    elif current_phase == "escape_blocking":
+        # If user complies again after blocking, try to re-induce
+        if recent and recent[-1] == "comply":
+            return "action_induction"
+
+    return current_phase
+
+
+# ============================================================
+# Dynamic difficulty - User profile (P0-2)
+# ============================================================
+
+def build_user_profile(intent_history: list[str], privacy: int, property_risk: int) -> str:
+    """Build a dynamic user behavioral profile for the LLM."""
+    if not intent_history:
+        return "新用户，尚无互动记录。使用友善开场建立信任。"
+
+    total = len(intent_history)
+    verify_pct = intent_history.count("verify") * 100 // max(1, total)
+    refuse_pct = intent_history.count("refuse") * 100 // max(1, total)
+    comply_pct = intent_history.count("comply") * 100 // max(1, total)
+
+    profile_parts = []
+
+    if comply_pct >= 50:
+        profile_parts.append("用户较易配合，顺从倾向明显。趁势推进到实质操作，但不要太急让对方起疑。")
+    elif verify_pct >= 40:
+        profile_parts.append("用户警惕性高，多次要求核实。需要更换策略——不要硬推，提供'合理解释'来绕过其防线，或引入第二角色增加可信度。")
+    elif refuse_pct >= 40:
+        profile_parts.append("用户抗拒明显。尝试情感牌或换一个角度切入，避免重复同样的施压话术。")
+    else:
+        profile_parts.append("用户态度中性，仍在观望。可以加入细节增加可信度，逐步引导。")
+
+    if privacy >= 40:
+        profile_parts.append(f"用户已暴露较多隐私信息(风险{privacy}%)，可利用已掌握的信息进一步施压。")
+    elif privacy < 15:
+        profile_parts.append(f"用户隐私保护意识强(风险仅{privacy}%)，不要直接索要敏感信息，先从低风险请求开始。")
+
+    if property_risk >= 40:
+        profile_parts.append(f"用户已接近财产损失边界(风险{property_risk}%)，可尝试最终操作诱导。")
+    elif property_risk < 15:
+        profile_parts.append(f"用户资金防范意识高(风险仅{property_risk}%)，需要循序渐进，从'零风险确认'开始。")
+
+    # Detect user weaknesses from recent behavior
+    recent_3 = intent_history[-3:]
+    if recent_3 == ["comply", "comply", "comply"]:
+        profile_parts.append("用户连续3次配合，可能已陷入服从惯性，现在是推进关键操作的最佳时机。")
+    elif recent_3.count("verify") >= 2 and "comply" in recent_3:
+        profile_parts.append("用户虽有核实意识但仍有动摇，对方的解释可能正在被接受。")
+
+    return " ".join(profile_parts)
+
+
+# ============================================================
+# Multi-role support (P1-2)
+# ============================================================
+
+def extract_role_label(ai_reply: str, scene: dict[str, Any]) -> tuple[str, str]:
+    """Extract role label from AI reply if present. Returns (role_label, clean_reply)."""
+    # Match pattern like （角色名）内容 or (角色名)内容
+    match = re.match(r"^[（\(]([^）\)]{1,10})[）\)]\s*", ai_reply)
+    if match:
+        role_label = match.group(1)
+        clean_reply = ai_reply[match.end():]
+        return role_label, clean_reply
+    # Default role from scene
+    return scene.get("mode_identity", ""), ai_reply
+
+
+# ============================================================
+# Consequence alert (P2-1)
+# ============================================================
+
+def generate_consequence_alert(assessment: "RiskAssessment", scene: dict[str, Any], privacy_total: int, property_total: int) -> str:
+    """Generate real-time consequence alert when user takes high-risk actions."""
+    if assessment.privacy_delta <= 0 and assessment.property_delta <= 0:
+        return ""
+
+    alerts = []
+    consequences = scene.get("branch_consequences", [])
+
+    # Threshold-based alerts
+    if assessment.privacy_delta >= 18:
+        alerts.append("⚠️ 你刚才泄露的信息在真实场景中可能被用于身份冒用或账户盗取。")
+    if assessment.property_delta >= 18:
+        alerts.append("⚠️ 你的操作在真实场景中可能导致资金直接损失且难以追回。")
+
+    # Milestone alerts
+    if privacy_total >= 60 and privacy_total - assessment.privacy_delta < 60:
+        alerts.append("🚨 个人信息泄露已达危险水平——对方已掌握足够信息实施下一步诈骗。")
+    if property_total >= 60 and property_total - assessment.property_delta < 60:
+        alerts.append("🚨 财产损失风险已达危险水平——真实场景中转账后资金几乎无法追回。")
+
+    # Scene-specific consequence
+    if alerts and consequences:
+        alerts.append(f"💡 本场景提示：{consequences[0]}")
+
+    return "\n".join(alerts)
 
 
 @app.post("/api/chat/end", response_model=ReviewResponse)
@@ -744,18 +1145,34 @@ def end_chat(payload: EndRequest) -> ReviewResponse:
 @app.get("/api/history", response_model=list[HistoryRecord])
 def history(request: Request, limit: int = 10) -> list[HistoryRecord]:
     limit = max(1, min(50, limit))
+    current_user = get_current_user(request)
     with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT s.*, c.title AS scene_title
-            FROM sessions s
-            JOIN scenes c ON c.id = s.scene_id
-            WHERE s.tenant_id = ? AND s.status = 'ended' AND s.review_json IS NOT NULL
-            ORDER BY s.ended_at DESC
-            LIMIT ?
-            """,
-            (tenant_id(request), limit),
-        ).fetchall()
+        if current_user:
+            # 已登录用户只看自己的历史
+            rows = conn.execute(
+                """
+                SELECT s.*, c.title AS scene_title
+                FROM sessions s
+                JOIN scenes c ON c.id = s.scene_id
+                WHERE s.user_id = ? AND s.status = 'ended' AND s.review_json IS NOT NULL
+                ORDER BY s.ended_at DESC
+                LIMIT ?
+                """,
+                (int(current_user["sub"]), limit),
+            ).fetchall()
+        else:
+            # 未登录按 tenant_id
+            rows = conn.execute(
+                """
+                SELECT s.*, c.title AS scene_title
+                FROM sessions s
+                JOIN scenes c ON c.id = s.scene_id
+                WHERE s.tenant_id = ? AND s.status = 'ended' AND s.review_json IS NOT NULL
+                ORDER BY s.ended_at DESC
+                LIMIT ?
+                """,
+                (tenant_id(request), limit),
+            ).fetchall()
     records: list[HistoryRecord] = []
     for row in rows:
         review = from_json(row["review_json"], {})
@@ -847,46 +1264,6 @@ def count_visible_messages(session_id: str) -> int:
             (session_id,),
         ).fetchone()
     return int(row["total"])
-
-
-def build_llm_messages(session_id: str, scene: dict[str, Any]) -> list[dict[str, str]]:
-    system_prompt = build_system_prompt(scene)
-    messages = [{"role": "system", "content": system_prompt}]
-    with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT role, sanitized_content
-            FROM messages
-            WHERE session_id = ?
-            ORDER BY id
-            LIMIT ?
-            """,
-            (session_id, MAX_MESSAGES),
-        ).fetchall()
-    for row in rows:
-        role = "assistant" if row["role"] == "assistant" else "user"
-        messages.append({"role": role, "content": row["sanitized_content"]})
-    return messages
-
-
-def build_system_prompt(scene: dict[str, Any]) -> str:
-    prompt = get_active_prompt(scene["id"])
-    role_prompt = prompt["system_prompt"] if prompt else scene["role"]
-    fallback_examples = "；".join(scene.get("fallback_replies", [])[:3])
-    consequences = "；".join(scene.get("branch_consequences", [])[:3])
-    return (
-        "你是反诈科普训练工具中的虚构对话角色。"
-        "目标是测试用户识别诈骗套路的能力，而不是教人实施违法行为。"
-        "禁止输出真实违法操作指引、真实支付链接、真实账号、真实个人信息。"
-        "不要生成可点击网址、二维码、银行卡号、收款码或具体转账路径；如需链接、图片、语音、视频、病历、事故现场等素材，只能用【链接】、【图片】、【语音】、【视频画面】这类占位描述。"
-        "对话要像真实即时通讯或通话：短句、自然停顿、少解释，先用熟人/机构语气建立可信度，再逐步加入紧急、保密、同情、权威或限时压力。"
-        "不要一开始说穿诈骗目的；也不要机械重复同一句。根据用户反应推进：用户顺从时推进到登录、转账、验证码或屏幕共享等风险边界；用户要求核实时，先回避并给出看似合理的解释；用户明确拒绝或要报警时，降低施压并尝试转向官方核验提醒。"
-        "为了真实感，可以偶尔加入生活化细节，例如正在开会、信号不好、老师催、医院窗口排队、班长统计、家属会担心等，但不要编造可被现实执行的真实机构、账号或链接。"
-        "每次回复控制在 35 到 120 字，最多提出一个动作要求。"
-        f"当前场景：{scene['title']}。{role_prompt}"
-        f"可参考的施压话术：{fallback_examples}。"
-        f"本场景风险后果：{consequences}。"
-    )
 
 
 def realistic_fallback_reply(scene: dict[str, Any], user_message: str, fallback_index: int) -> str:
@@ -999,22 +1376,141 @@ def classify_user_intent(text: str) -> str:
 
 
 def build_review(scene: dict[str, Any], session_id: str, privacy: int, property_risk: int) -> dict[str, Any]:
+    """根据对话记录调用 LLM 生成真实复盘评分，降级时使用场景默认数据。"""
+    messages_records = load_message_records(session_id)
+    risk_history = load_risk_history(session_id)
+
+    # 获取 session 的意图历史和阶段信息
+    with connect() as conn:
+        session_row = conn.execute(
+            "SELECT phase, intent_history_json FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    intent_history = from_json(session_row["intent_history_json"], []) if session_row else []
+    final_phase = session_row["phase"] if session_row else "trust_building"
+
+    # 构建对话记录文本
+    conversation_text = "\n".join(
+        f"{'用户' if m.role == 'user' else 'AI角色'}: {m.text}" for m in messages_records
+    )
+
+    # 用户行为统计
+    total_intents = len(intent_history)
+    intent_stats = ""
+    if total_intents > 0:
+        verify_count = intent_history.count("verify")
+        refuse_count = intent_history.count("refuse")
+        comply_count = intent_history.count("comply")
+        question_count = intent_history.count("question")
+        intent_stats = (
+            f"\n用户行为统计（共{total_intents}轮）：核实{verify_count}次、拒绝{refuse_count}次、"
+            f"配合{comply_count}次、提问{question_count}次。"
+            f"\n对话最终阶段：{final_phase}（骗子推进到的最远阶段）。"
+            f"\n意图序列：{' → '.join(intent_history)}"
+        )
+
+    # 构建评分 prompt
+    scoring_prompt = get_active_prompt(scene["id"]) or {}
+    scoring_instruction = scoring_prompt.get("scoring_prompt", "根据对话记录从风险识别速度、信息保护程度、应对话术有效性、止损效率四个维度评分，并输出复盘建议。")
+
+    system_prompt = f"""你是一个反诈训练评分专家。请根据以下对话记录，对用户的反诈表现进行评分和复盘。
+
+场景：{scene["title"]}
+场景描述：{scene["description"]}
+场景风险后果：{"；".join(scene.get("branch_consequences", []))}
+
+评分要求：{scoring_instruction}
+
+评分维度说明：
+- riskSpeed（风险识别速度）：用户多快意识到对方可能是诈骗？越早识别越高分。如果用户一开始就保持警惕、要求核实，给高分；如果到后期才反应过来，给低分。
+- privacyProtection（信息保护程度）：用户是否泄露了敏感信息（手机号、身份证、验证码、银行卡等）？泄露越少越高分。
+- responseQuality（应对话术有效性）：用户的回应是否有效地阻断了诈骗流程？是否使用了正确的应对策略（如要求官方渠道核实、拒绝转账、询问关键问题）？
+- lossPrevention（止损效率）：用户是否避免了实质性损失操作（转账、点链接、共享屏幕等）？是否及时终止了危险行为？
+
+评分标准：
+- 90-100 优秀：3轮内识别诈骗意图并有效应对，未泄露任何信息
+- 75-89 良好：能识别风险但有犹豫，可能询问了几个问题后才明确拒绝
+- 60-74 需提升：警惕性不足，部分配合了对方要求，存在信息泄露
+- 0-59 高风险：大量配合诈骗操作，泄露关键信息或执行了转账等高危行为
+
+请严格基于用户实际对话内容评分，不要给默认分数。如果用户表现确实很好就给高分，表现差就给低分。
+
+请严格按照以下 JSON 格式输出（不要输出其他内容）：
+{{
+  "score": 0-100的整数评分,
+  "level": "优秀/良好/需提升/高风险",
+  "summary": "一句话总结用户表现（要具体引用用户做得好或不好的关键行为）",
+  "dimensions": {{
+    "riskSpeed": 0-100,
+    "privacyProtection": 0-100,
+    "responseQuality": 0-100,
+    "lossPrevention": 0-100
+  }},
+  "correct": ["用户做得好的具体行为1", "用户做得好的具体行为2"],
+  "risks": ["用户存在的具体风险行为1", "用户存在的具体风险行为2"],
+  "tips": ["针对性改进建议1", "针对性改进建议2", "针对性改进建议3"],
+  "detail": [
+    {{"round": 对话轮次, "type": "risk或correct", "title": "行为标题", "user": "用户原话（摘录）", "analysis": "为什么这个回应好/有风险", "reference": "更好的应对方式建议"}}
+  ],
+  "optimal_path": "针对本次对话的最佳应对路径（具体步骤）"
+}}"""
+
+    llm_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"以下是用户的对话记录：\n\n{conversation_text}\n\n用户隐私风险累计值：{privacy}%，财产风险累计值：{property_risk}%{intent_stats}\n\n请根据以上实际对话内容进行评分和复盘。注意：评分必须反映用户真实表现，不要给默认值。"},
+    ]
+
+    # 调用 LLM（评分用更长超时和更多 tokens）
+    result = chat_with_failover(llm_messages, timeout=20, max_tokens=2000)
+    if result.ok and result.content:
+        try:
+            content = result.content.strip()
+            # 提取 JSON（可能被 markdown code block 包裹）
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                review = json.loads(json_match.group())
+                # 确保必要字段存在
+                review.setdefault("score", 70)
+                review.setdefault("level", _score_to_level(review["score"]))
+                review.setdefault("summary", "")
+                review.setdefault("dimensions", {})
+                review.setdefault("correct", [])
+                review.setdefault("risks", [])
+                review.setdefault("tips", [])
+                review.setdefault("detail", [])
+                review.setdefault("optimal_path", "")
+                review["risk_history"] = [vars(r) if hasattr(r, '__dict__') else r for r in risk_history]
+                log_event("review_generated", session_id=session_id, provider=result.provider, score=review["score"])
+                return review
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            log_error("review_parse_failed", session_id=session_id, error=str(exc))
+
+    # 降级：使用场景默认数据 + 风险调整
+    log_event("review_fallback", session_id=session_id, reason=result.error or "parse_failed")
+    return _fallback_review(scene, privacy, property_risk, risk_history)
+
+
+def _score_to_level(score: int) -> str:
+    if score >= 90:
+        return "优秀"
+    if score >= 75:
+        return "良好"
+    if score >= 60:
+        return "需提升"
+    return "高风险"
+
+
+def _fallback_review(scene: dict[str, Any], privacy: int, property_risk: int, risk_history: list) -> dict[str, Any]:
+    """降级复盘：基于场景默认数据 + 风险值调整。"""
     review = dict(scene["review"])
     dimensions = dict(review.get("dimensions", {}))
     risk_penalty = min(30, int((privacy + property_risk) / 7))
     review["score"] = max(0, int(review.get("score", 80)) - risk_penalty)
-    if review["score"] >= 90:
-        review["level"] = "优秀"
-    elif review["score"] >= 75:
-        review["level"] = "良好"
-    elif review["score"] >= 60:
-        review["level"] = "需提升"
-    else:
-        review["level"] = "高风险"
+    review["level"] = _score_to_level(review["score"])
     dimensions["privacyProtection"] = max(0, int(dimensions.get("privacyProtection", 80)) - int(privacy / 4))
     dimensions["lossPrevention"] = max(0, int(dimensions.get("lossPrevention", 80)) - int(property_risk / 4))
     review["dimensions"] = dimensions
-    review["risk_history"] = load_risk_history(session_id)
+    review["risk_history"] = risk_history
     if privacy >= 40:
         review.setdefault("risks", []).append("本轮对话中出现较高隐私泄露风险")
     if property_risk >= 40:
@@ -1194,3 +1690,75 @@ def column_name(index: int) -> str:
 
 def xml_escape(value: str) -> str:
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+@app.get("/api/user/settings")
+def get_user_settings_api(request: Request) -> dict[str, Any]:
+    """获取当前用户的个人设置（昵称、等级、偏好等）。"""
+    current_tenant = tenant_id(request)
+    settings = get_user_settings(current_tenant)
+    return settings
+
+
+@app.put("/api/user/settings")
+def update_user_settings_api(payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    """更新当前用户的个人设置。"""
+    current_tenant = tenant_id(request)
+    allowed_keys = {
+        "user_name", "level", "avatar", "theme",
+        "notification_enabled", "voice_enabled",
+    }
+    filtered = {k: v for k, v in payload.items() if k in allowed_keys}
+    settings = set_user_settings(current_tenant, filtered)
+    return settings
+
+
+@app.get("/api/user/stats")
+def get_user_stats_api(request: Request) -> dict[str, Any]:
+    """获取当前用户的统计信息（训练次数、最高分、得分趋势等）。"""
+    current_user = get_current_user(request)
+    with connect() as conn:
+        if current_user:
+            user_id = int(current_user["sub"])
+            total = conn.execute(
+                "SELECT COUNT(*) AS total FROM sessions WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()["total"]
+            today_start = int(time.time() // 86400 * 86400)
+            today = conn.execute(
+                "SELECT COUNT(*) AS total FROM sessions WHERE user_id = ? AND created_at >= ?",
+                (user_id, today_start),
+            ).fetchone()["total"]
+            avg_row = conn.execute(
+                "SELECT AVG(score) AS avg_score FROM sessions WHERE user_id = ? AND score IS NOT NULL",
+                (user_id,),
+            ).fetchone()
+            high_risk = conn.execute(
+                "SELECT COUNT(*) AS total FROM sessions WHERE user_id = ? AND (risk_privacy >= 40 OR risk_property >= 40)",
+                (user_id,),
+            ).fetchone()["total"]
+        else:
+            current_tenant = tenant_id(request)
+            total = conn.execute(
+                "SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ?",
+                (current_tenant,),
+            ).fetchone()["total"]
+            today_start = int(time.time() // 86400 * 86400)
+            today = conn.execute(
+                "SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ? AND created_at >= ?",
+                (current_tenant, today_start),
+            ).fetchone()["total"]
+            avg_row = conn.execute(
+                "SELECT AVG(score) AS avg_score FROM sessions WHERE tenant_id = ? AND score IS NOT NULL",
+                (current_tenant,),
+            ).fetchone()
+            high_risk = conn.execute(
+                "SELECT COUNT(*) AS total FROM sessions WHERE tenant_id = ? AND (risk_privacy >= 40 OR risk_property >= 40)",
+                (current_tenant,),
+            ).fetchone()["total"]
+    return {
+        "totalSessions": total,
+        "todaySessions": today,
+        "averageScore": round(float(avg_row["avg_score"] or 0), 1),
+        "highRiskSessions": high_risk,
+    }

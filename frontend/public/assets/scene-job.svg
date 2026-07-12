@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="bg3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2d5e"/>
+      <stop offset="100%" stop-color="#0d1f40"/>
+    </linearGradient>
+    <linearGradient id="clipboard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4a7dff"/>
+      <stop offset="100%" stop-color="#2a5ac7"/>
+    </linearGradient>
+    <linearGradient id="coin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd966"/>
+      <stop offset="100%" stop-color="#e8a820"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="56" fill="url(#bg3)" opacity="0.9"/>
+  <circle cx="60" cy="60" r="56" fill="none" stroke="#2a4a8e" stroke-width="1.5" opacity="0.5"/>
+  <!-- Clipboard -->
+  <rect x="28" y="28" width="44" height="58" rx="5" fill="url(#clipboard)"/>
+  <rect x="42" y="22" width="16" height="10" rx="3" fill="#2a4a9e" stroke="#5a9aff" stroke-width="1"/>
+  <!-- Clipboard lines (document) -->
+  <rect x="34" y="40" width="30" height="3" rx="1.5" fill="#fff" opacity="0.7"/>
+  <rect x="34" y="48" width="24" height="3" rx="1.5" fill="#fff" opacity="0.5"/>
+  <rect x="34" y="56" width="28" height="3" rx="1.5" fill="#fff" opacity="0.5"/>
+  <rect x="34" y="64" width="20" height="3" rx="1.5" fill="#fff" opacity="0.4"/>
+  <rect x="34" y="72" width="26" height="3" rx="1.5" fill="#fff" opacity="0.4"/>
+  <!-- Checkmarks -->
+  <path d="M35 41 L37 43 L40 39" fill="none" stroke="#4aff8b" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>
+  <!-- Coin / Money symbol -->
+  <circle cx="82" cy="72" r="18" fill="url(#coin)" stroke="#c9942e" stroke-width="2"/>
+  <circle cx="82" cy="72" r="13" fill="none" stroke="#b8860b" stroke-width="1.5" opacity="0.5"/>
+  <text x="76" y="78" font-size="18" fill="#8b6914" font-weight="bold" font-family="serif">¥</text>
+  <!-- Link chain -->
+  <ellipse cx="88" cy="40" rx="10" ry="6" fill="none" stroke="#8ab4ff" stroke-width="2.5" transform="rotate(-30 88 40)"/>
+  <ellipse cx="78" cy="46" rx="10" ry="6" fill="none" stroke="#8ab4ff" stroke-width="2.5" transform="rotate(-30 78 46)"/>
+  <!-- Warning sparkle -->
+  <circle cx="98" cy="22" r="5" fill="#ff6b4a" opacity="0.85"/>
+  <text x="95.5" y="26" font-size="8" fill="#fff" font-weight="bold">!</text>
+</svg>

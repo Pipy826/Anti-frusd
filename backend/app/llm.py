@@ -25,7 +25,7 @@ class LLMResult:
 class LLMProvider(Protocol):
     name: str
 
-    def chat(self, messages: list[dict[str, str]], timeout: int = 10) -> LLMResult:
+    def chat(self, messages: list[dict[str, str]], timeout: int = 10, max_tokens: int = 0) -> LLMResult:
         ...
 
 
@@ -37,7 +37,7 @@ class DeepSeekProvider:
         self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
         self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-    def chat(self, messages: list[dict[str, str]], timeout: int = 10) -> LLMResult:
+    def chat(self, messages: list[dict[str, str]], timeout: int = 10, max_tokens: int = 0) -> LLMResult:
         started = time.perf_counter()
         if not self.api_key:
             return LLMResult(None, self.name, False, True, "missing_api_key")
@@ -47,7 +47,7 @@ class DeepSeekProvider:
             "model": self.model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 220,
+            "max_tokens": max_tokens if max_tokens > 0 else 1200,
         }
         request = urllib.request.Request(
             self.base_url,
@@ -88,7 +88,7 @@ class PlaceholderProvider:
         self.name = name
         self.key_env = key_env
 
-    def chat(self, messages: list[dict[str, str]], timeout: int = 10) -> LLMResult:
+    def chat(self, messages: list[dict[str, str]], timeout: int = 10, max_tokens: int = 0) -> LLMResult:
         if not os.getenv(self.key_env):
             return LLMResult(None, self.name, False, True, "missing_api_key")
         return LLMResult(None, self.name, False, True, "provider_not_implemented")
@@ -104,10 +104,10 @@ def configured_providers() -> list[LLMProvider]:
     return [providers[name] for name in (item.strip() for item in order.split(",")) if name in providers]
 
 
-def chat_with_failover(messages: list[dict[str, str]]) -> LLMResult:
+def chat_with_failover(messages: list[dict[str, str]], timeout: int = 10, max_tokens: int = 0) -> LLMResult:
     last_result = LLMResult(None, "fallback", False, True, "no_provider")
     for provider in configured_providers():
-        result = provider.chat(messages)
+        result = provider.chat(messages, timeout=timeout, max_tokens=max_tokens)
         if result.ok and result.content:
             log_event("llm_success", provider=result.provider, duration_ms=result.duration_ms, attempts=result.attempts)
             return result

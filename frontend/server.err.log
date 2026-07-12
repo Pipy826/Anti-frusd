@@ -94,3 +94,114 @@
      |                                    ^
   2  |  import { loadHistory as loadLocalHistory } from '../utils/storage'
   3  |  [39m
+[2m17:09:42[22m [31m[1m[vite][22m[39m [31mInternal server error: Invalid end tag.[39m
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+      at createCompilerError (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:1378:17)
+      at emitError (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:3014:5)
+      at Object.onclosetag (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:2391:9)
+      at Tokenizer.stateInClosingTagName (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:799:16)
+      at Tokenizer.parse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:1157:16)
+      at Object.baseParse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:3053:13)
+      at Object.parse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-dom\dist\compiler-dom.cjs.js:910:23)
+      at Object.parse$1 [as parse] (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:1824:24)
+      at createDescriptor (file:///E:/SJ/Project-Recurrence/Anti-fraud/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:71:43)
+      at transformMain (file:///E:/SJ/Project-Recurrence/Anti-fraud/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:2421:34)
+[2m17:09:42[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Invalid end tag.
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+[2m17:09:42[22m [31m[1m[vite][22m[39m [31mInternal server error: Invalid end tag.[39m
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+      at createCompilerError (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:1378:17)
+      at emitError (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:3014:5)
+      at Object.onclosetag (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:2391:9)
+      at Tokenizer.stateInClosingTagName (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:799:16)
+      at Tokenizer.parse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:1157:16)
+      at Object.baseParse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:3053:13)
+      at Object.parse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-dom\dist\compiler-dom.cjs.js:910:23)
+      at Object.parse$1 [as parse] (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:1824:24)
+      at createDescriptor (file:///E:/SJ/Project-Recurrence/Anti-fraud/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:71:43)
+      at transformMain (file:///E:/SJ/Project-Recurrence/Anti-fraud/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:2421:34)
+[2m17:09:42[22m [31m[1m[vite][22m[39m [31mInternal server error: Invalid end tag.[39m
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+      at createCompilerError (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:1378:17)
+      at emitError (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:3014:5)
+      at Object.onclosetag (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:2391:9)
+      at Tokenizer.stateInClosingTagName (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:799:16)
+      at Tokenizer.parse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:1157:16)
+      at Object.baseParse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-core\dist\compiler-core.cjs.js:3053:13)
+      at Object.parse (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-dom\dist\compiler-dom.cjs.js:910:23)
+      at Object.parse$1 [as parse] (E:\SJ\Project-Recurrence\Anti-fraud\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:1824:24)
+      at createDescriptor (file:///E:/SJ/Project-Recurrence/Anti-fraud/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:71:43)
+      at transformMain (file:///E:/SJ/Project-Recurrence/Anti-fraud/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:2421:34)
+[2m17:09:50[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Invalid end tag.
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+[2m17:12:49[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Invalid end tag.
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+[2m17:13:12[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Invalid end tag.
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+[2m17:13:25[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Invalid end tag.
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m
+[2m17:13:37[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Invalid end tag.
+  Plugin: [35mvite:vue[39m
+  File: [36mE:/SJ/Project-Recurrence/Anti-fraud/frontend/src/components/SettingsView.vue[39m:218:1
+[33m  216|  </script>
+  217|  
+  218|  </content>
+     |   ^
+  219|  </file>
+  220|  </tool_call>[39m

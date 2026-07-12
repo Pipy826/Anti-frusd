@@ -1,5 +1,11 @@
 <template>
   <main class="app" :class="{ 'app-admin': screen === 'admin' }" aria-live="polite">
+    <LoginView
+      v-if="screen === 'login'"
+      @login="handleLogin"
+      @admin-login="handleAdminLogin"
+    />
+
     <HomeView
       v-if="screen === 'home'"
       :scenes="scenes"
@@ -17,11 +23,14 @@
       :risk="riskState"
       :quick-replies="quickReplies"
       :asr-supported="asrSupported"
+      :phase="currentPhase"
+      :consequence-alert="consequenceAlert"
       @back="go('home')"
       @send="handleSend"
       @end="finishChallenge"
       @speak="speak"
       @listen="startSpeechInput"
+      @dismiss-alert="consequenceAlert = ''"
     />
 
     <CalibrationView
@@ -48,10 +57,12 @@
       :error="chatError"
       :asr-supported="asrSupported"
       :messages="messages"
+      :auto-listen="autoListenMode"
       @back="go('incoming')"
       @send="handleSend"
       @listen="startSpeechInput"
       @hangup="finishChallenge"
+      @toggle-auto-listen="toggleAutoListen"
     />
 
     <VideoCallView
@@ -90,6 +101,7 @@
       v-if="screen === 'profile'"
       @clear="clearLocalHistory"
       @go="go"
+      @logout="handleLogout"
     />
 
     <AdminView
@@ -97,6 +109,12 @@
       :brand="brand"
       @go="go"
       @brand-updated="handleBrandUpdated"
+      @logout="handleLogout"
+    />
+
+    <SettingsView
+      v-if="screen === 'settings'"
+      @go="go"
     />
 
     <GamifiedView
@@ -113,7 +131,7 @@
       @start="prepareCalibration"
     />
 
-    <div v-if="!disclaimerAccepted && screen !== 'admin'" class="consent-mask">
+    <div v-if="!disclaimerAccepted && !['admin', 'login'].includes(screen)" class="consent-mask">
       <section class="consent-dialog">
         <h2>使用前确认</h2>
         <p>{{ brand.complianceNotice }}</p>
@@ -125,6 +143,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import LoginView from './components/LoginView.vue'
 import HomeView from './components/HomeView.vue'
 import ModeModal from './components/ModeModal.vue'
 import CalibrationView from './components/CalibrationView.vue'
@@ -136,13 +155,19 @@ import ReviewView from './components/ReviewView.vue'
 import ReviewDetailView from './components/ReviewDetailView.vue'
 import HistoryView from './components/HistoryView.vue'
 import ProfileView from './components/ProfileView.vue'
+import SettingsView from './components/SettingsView.vue'
 import AdminView from './components/AdminView.vue'
 import GamifiedView from './components/GamifiedView.vue'
 import { scenes as fallbackScenes, getScene as getFallbackScene } from './data/scenes'
 import { clearHistory, loadHistory, saveHistoryItem } from './utils/storage'
-import { endChat, fetchBrand, fetchHistory, fetchScenes, fetchVoiceConfig, reportFrontendError, sendMessage, startChat, synthesizeSpeech, transcribeAudio } from './services/api'
+import { endChat, fetchBrand, fetchHistory, fetchScenes, fetchVoiceConfig, isLoggedIn, isAdmin, getCurrentUser, logout, reportFrontendError, sendMessage, startChat, synthesizeSpeech, transcribeAudio } from './services/api'
+import { playWithPhoneEffect, playConnectTone, playHangupTone, disposeAudioContext } from './utils/phoneAudio'
 
-const screen = ref(window.location.hash.startsWith('#admin') ? 'admin' : 'home')
+const screen = ref(
+  window.location.hash.startsWith('#admin')
+    ? (isLoggedIn() && isAdmin() ? 'admin' : 'login')
+    : (isLoggedIn() ? 'home' : 'login')
+)
 const scenes = ref(fallbackScenes)
 const pendingScene = ref(fallbackScenes[0])
 const pendingMode = ref('text')
@@ -154,6 +179,9 @@ const currentReview = ref(fallbackScenes[0].review)
 const history = ref(loadHistory())
 const riskState = ref({ privacy: 0, property: 0, privacy_delta: 0, property_delta: 0, reason: '', warning: '' })
 const quickReplies = ref(fallbackScenes[0].quickReplies)
+const consequenceAlert = ref('')
+const currentPhase = ref('trust_building')
+const lastRoleLabel = ref('')
 const voiceSettings = ref({ ttsProvider: 'browser', asrProvider: 'browser', voiceName: '训练角色中性声', voiceGender: 'neutral', rate: 0.95, phoneNumber: '188 **** 8888', location: '未知' })
 const disclaimerAccepted = ref(localStorage.getItem('anti_fraud_disclaimer_ok') === '1')
 const brand = ref({
@@ -166,14 +194,16 @@ const modeModalVisible = ref(false)
 const chatLoading = ref(false)
 const chatError = ref('')
 const callStartedAt = ref(0)
-const callSeconds = ref(28)
+const callSeconds = ref(0)
 const callState = ref('待来电')
+const autoListenMode = ref(true)
 let callTimer = null
 let recognition = null
 let currentUtterance = null
 let ringContext = null
 let ringOscillator = null
 let ttsAudio = null
+let phonePlayer = null
 
 const currentScene = computed(() => scenes.value.find((scene) => scene.id === currentSceneId.value) || scenes.value[0] || getFallbackScene(currentSceneId.value))
 const browserAsrSupported = computed(() => {
@@ -206,6 +236,22 @@ function go(next) {
   screen.value = next
 }
 
+function handleLogin() {
+  // 登录成功后清除旧的本地历史，后续由后端数据覆盖
+  clearHistory()
+  history.value = []
+  screen.value = 'home'
+}
+
+function handleAdminLogin() {
+  screen.value = 'admin'
+}
+
+function handleLogout() {
+  logout()
+  screen.value = 'login'
+}
+
 function openModeModal(scene) {
   pendingScene.value = scene
   modeModalVisible.value = true
@@ -223,33 +269,57 @@ async function startChallenge(mode) {
   currentSceneId.value = pendingScene.value.id
   chatError.value = ''
   chatLoading.value = false
+  currentPhase.value = 'trust_building'
+  consequenceAlert.value = ''
+  lastRoleLabel.value = ''
   await loadVoiceSettings(pendingScene.value.id)
-  const started = await startChat(pendingScene.value.id, mode)
-  sessionId.value = started.session_id
-  riskState.value = started.risk || { privacy: 0, property: 0, privacy_delta: 0, property_delta: 0, reason: '', warning: '' }
-  quickReplies.value = started.quick_replies?.length ? started.quick_replies : pendingScene.value.quickReplies
-  const intro = started.intro || pendingScene.value.intro
-  const firstText = intro ? `${intro}\n\n${started.first_message}` : started.first_message
-  messages.value = [{ role: 'ai', text: firstText, time: '10:21' }]
-  currentReview.value = pendingScene.value.review
+  try {
+    const started = await startChat(pendingScene.value.id, mode)
+    sessionId.value = started.session_id || `local-${Date.now()}`
+    riskState.value = started.risk || { privacy: 0, property: 0, privacy_delta: 0, property_delta: 0, reason: '', warning: '' }
+    quickReplies.value = started.quick_replies?.length ? started.quick_replies : pendingScene.value.quickReplies
+    const intro = started.intro || pendingScene.value.intro
+    const firstText = intro ? `${intro}\n\n${started.first_message}` : started.first_message
+    messages.value = [{ role: 'ai', text: firstText, time: '10:21' }]
+    currentReview.value = pendingScene.value.review
 
-  if (mode === 'phone') {
-    callState.value = '响铃中'
-    screen.value = 'incoming'
-    startRinging()
-    return
+    if (mode === 'phone') {
+      callState.value = '响铃中'
+      screen.value = 'incoming'
+      startRinging()
+      return
+    }
+    if (mode === 'video') {
+      beginCall()
+      screen.value = 'video'
+      speak(started.first_message)
+      return
+    }
+    screen.value = 'chat'
+  } catch (err) {
+    chatError.value = err.message || '后端服务暂不可用，已切换到本地模式'
+    // 降级到本地模式
+    sessionId.value = `local-${Date.now()}`
+    messages.value = [{ role: 'ai', text: pendingScene.value.firstMessage, time: '10:21' }]
+    currentReview.value = pendingScene.value.review
+    if (mode === 'phone') {
+      callState.value = '响铃中'
+      screen.value = 'incoming'
+      startRinging()
+      return
+    }
+    if (mode === 'video') {
+      beginCall()
+      screen.value = 'video'
+      return
+    }
+    screen.value = 'chat'
   }
-  if (mode === 'video') {
-    beginCall()
-    screen.value = 'video'
-    speak(started.first_message)
-    return
-  }
-  screen.value = 'chat'
 }
 
 function acceptCall() {
   stopRinging()
+  playConnectTone()
   beginCall()
   screen.value = 'call'
   speakLastAi()
@@ -258,11 +328,15 @@ function acceptCall() {
 function beginCall() {
   callState.value = '通话中'
   callStartedAt.value = Date.now()
-  callSeconds.value = 28
+  callSeconds.value = 0
   stopCallTimer()
   callTimer = window.setInterval(() => {
-    callSeconds.value = Math.max(0, Math.floor((Date.now() - callStartedAt.value) / 1000) + 28)
+    callSeconds.value = Math.floor((Date.now() - callStartedAt.value) / 1000)
   }, 1000)
+}
+
+function toggleAutoListen(enabled) {
+  autoListenMode.value = enabled
 }
 
 async function handleSend(text) {
@@ -277,9 +351,13 @@ async function handleSend(text) {
   chatLoading.value = true
   try {
     const reply = await sendMessage(sessionId.value, currentSceneId.value, text.trim(), messages.value.length)
-    messages.value.push({ role: 'ai', text: reply.ai_reply })
+    messages.value.push({ role: 'ai', text: reply.ai_reply, roleLabel: reply.role_label || '' })
     if (reply.risk) riskState.value = reply.risk
     if (reply.quick_replies?.length) quickReplies.value = reply.quick_replies
+    if (reply.phase) currentPhase.value = reply.phase
+    if (reply.consequence_alert) consequenceAlert.value = reply.consequence_alert
+    else consequenceAlert.value = ''
+    if (reply.role_label) lastRoleLabel.value = reply.role_label
     if (selectedMode.value === 'phone' || selectedMode.value === 'video') speak(reply.ai_reply)
   } catch (error) {
     chatError.value = error.message || '网络稍差，请重试'
@@ -294,8 +372,25 @@ async function finishChallenge() {
   stopRecognition()
   stopRinging()
   stopCallTimer()
+  if (selectedMode.value === 'phone' || selectedMode.value === 'video') {
+    playHangupTone()
+  }
   callState.value = '已挂断'
-  currentReview.value = await endChat(sessionId.value, currentSceneId.value)
+
+  // 至少需要用户发送过一条消息才能评分
+  const userMessages = messages.value.filter(m => m.role === 'user')
+  if (userMessages.length === 0) {
+    screen.value = 'home'
+    return
+  }
+
+  try {
+    if (!sessionId.value?.startsWith('local-')) {
+      currentReview.value = await endChat(sessionId.value, currentSceneId.value)
+    }
+  } catch {
+    // 使用场景默认复盘
+  }
   const record = {
     id: `${Date.now()}-${currentSceneId.value}`,
     sceneId: currentSceneId.value,
@@ -346,26 +441,46 @@ function speakLastAi() {
 
 async function speak(text) {
   if (!text) return
-  if (!['call', 'video'].includes(screen.value) && selectedMode.value !== 'text') return
   stopSpeech()
   stopRecognition()
   callState.value = '播报中'
+
+  const isPhoneMode = selectedMode.value === 'phone' || screen.value === 'call'
+
   if (voiceSettings.value.ttsProvider && voiceSettings.value.ttsProvider !== 'browser') {
     try {
       const result = await synthesizeSpeech(currentSceneId.value, text)
       if (result.audioBase64 && !result.degraded) {
-        ttsAudio = new Audio(`data:${result.mimeType};base64,${result.audioBase64}`)
-        ttsAudio.playbackRate = Number(voiceSettings.value.rate || 0.95)
-        ttsAudio.onended = () => {
-          if (screen.value === 'call') callState.value = '通话中'
-        }
-        await ttsAudio.play()
+        const dataUrl = `data:${result.mimeType};base64,${result.audioBase64}`
+        const rate = Number(voiceSettings.value.rate || 0.95)
+
+        // 电话模式启用音效滤波器，文字模式直接播放
+        phonePlayer = await playWithPhoneEffect(dataUrl, {
+          playbackRate: rate,
+          phoneEffect: isPhoneMode,
+          onEnded: () => {
+            phonePlayer = null
+            if (screen.value === 'call') {
+              callState.value = '通话中'
+              // Auto-listen after AI finishes speaking in phone mode
+              if (autoListenMode.value && asrSupported.value && !chatLoading.value) {
+                setTimeout(() => {
+                  if (callState.value === '通话中' && screen.value === 'call') {
+                    startSpeechInput()
+                  }
+                }, 600)
+              }
+            }
+          }
+        })
         return
       }
     } catch (error) {
       reportFrontendError(error, sessionId.value)
     }
   }
+
+  // 降级到浏览器 SpeechSynthesis
   if (!window.speechSynthesis) {
     if (screen.value === 'call') callState.value = '通话中'
     return
@@ -378,7 +493,17 @@ async function speak(text) {
     || voices.find((voice) => voice.lang?.startsWith('zh'))
   if (preferred) utterance.voice = preferred
   utterance.onend = () => {
-    if (screen.value === 'call') callState.value = '通话中'
+    if (screen.value === 'call') {
+      callState.value = '通话中'
+      // Auto-listen after browser TTS ends in phone mode
+      if (autoListenMode.value && asrSupported.value && !chatLoading.value) {
+        setTimeout(() => {
+          if (callState.value === '通话中' && screen.value === 'call') {
+            startSpeechInput()
+          }
+        }, 600)
+      }
+    }
   }
   utterance.onerror = () => {
     if (screen.value === 'call') callState.value = '通话中'
@@ -388,6 +513,10 @@ async function speak(text) {
 }
 
 function stopSpeech() {
+  if (phonePlayer) {
+    phonePlayer.stop()
+    phonePlayer = null
+  }
   if (ttsAudio) {
     ttsAudio.pause()
     ttsAudio.src = ''
@@ -532,12 +661,46 @@ function startRinging() {
   if (navigator.vibrate) navigator.vibrate([350, 180, 350, 600])
   try {
     ringContext = new (window.AudioContext || window.webkitAudioContext)()
-    ringOscillator = ringContext.createOscillator()
     const gain = ringContext.createGain()
-    ringOscillator.frequency.value = 880
-    gain.gain.value = 0.025
-    ringOscillator.connect(gain)
+    gain.gain.value = 0.08
     gain.connect(ringContext.destination)
+
+    // Pleasant ringtone melody - repeating pattern
+    const notes = [523, 659, 784, 659, 523, 659, 784, 659] // C5, E5, G5, E5 loop
+    const noteLength = 0.18
+    const gap = 0.06
+    const patternLength = notes.length * (noteLength + gap) + 0.8 // add pause between rings
+
+    function playPattern(startTime) {
+      notes.forEach((freq, i) => {
+        const osc = ringContext.createOscillator()
+        const noteGain = ringContext.createGain()
+        osc.type = 'sine'
+        osc.frequency.value = freq
+        noteGain.gain.setValueAtTime(0, startTime + i * (noteLength + gap))
+        noteGain.gain.linearRampToValueAtTime(0.8, startTime + i * (noteLength + gap) + 0.02)
+        noteGain.gain.setValueAtTime(0.8, startTime + i * (noteLength + gap) + noteLength - 0.03)
+        noteGain.gain.linearRampToValueAtTime(0, startTime + i * (noteLength + gap) + noteLength)
+        osc.connect(noteGain)
+        noteGain.connect(gain)
+        osc.start(startTime + i * (noteLength + gap))
+        osc.stop(startTime + i * (noteLength + gap) + noteLength)
+      })
+    }
+
+    // Schedule repeating pattern
+    const totalRings = 8
+    for (let r = 0; r < totalRings; r++) {
+      playPattern(ringContext.currentTime + r * patternLength)
+    }
+
+    // Use a silent oscillator as a handle to stop
+    ringOscillator = ringContext.createOscillator()
+    ringOscillator.frequency.value = 0
+    const silentGain = ringContext.createGain()
+    silentGain.gain.value = 0
+    ringOscillator.connect(silentGain)
+    silentGain.connect(ringContext.destination)
     ringOscillator.start()
   } catch {
     ringContext = null
@@ -562,19 +725,29 @@ onBeforeUnmount(() => {
   stopRecognition()
   stopRinging()
   stopCallTimer()
+  disposeAudioContext()
 })
 
 async function loadVoiceSettings(sceneId) {
   try {
-    voiceSettings.value = { ...voiceSettings.value, ...(await fetchVoiceConfig(sceneId)) }
-  } catch (error) {
-    reportFrontendError(error, sessionId.value)
+    const config = await fetchVoiceConfig(sceneId)
+    if (config) {
+      voiceSettings.value = { ...voiceSettings.value, ...config }
+    }
+  } catch {
+    // 使用默认语音设置
   }
 }
 
 async function refreshHistory() {
-  const remoteHistory = await fetchHistory(10)
-  if (remoteHistory?.length) history.value = remoteHistory
+  try {
+    const remoteHistory = await fetchHistory(10)
+    if (remoteHistory?.length) {
+      history.value = remoteHistory
+    }
+  } catch {
+    // 静默降级，使用本地历史
+  }
 }
 
 onMounted(async () => {

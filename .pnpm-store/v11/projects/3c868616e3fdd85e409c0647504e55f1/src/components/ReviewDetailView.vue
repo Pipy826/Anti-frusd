@@ -1,6 +1,5 @@
 <template>
   <section class="screen detail-screen is-active">
-    <StatusBar />
     <header class="simple-head"><button class="icon-btn" @click="$emit('back')">‹</button><h2>复盘详情展开</h2></header>
     <div class="glass-panel">
       <div class="tabs">
@@ -43,7 +42,6 @@
 
 <script setup>
 import { computed, nextTick, ref } from 'vue'
-import StatusBar from './StatusBar.vue'
 
 const props = defineProps({
   review: { type: Object, required: true },

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a3a6b"/>
+      <stop offset="100%" stop-color="#0d2240"/>
+    </linearGradient>
+    <linearGradient id="box1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d4a056"/>
+      <stop offset="100%" stop-color="#8b6914"/>
+    </linearGradient>
+    <linearGradient id="truck1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b8bff"/>
+      <stop offset="100%" stop-color="#1a5cc7"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="56" fill="url(#bg1)" opacity="0.9"/>
+  <circle cx="60" cy="60" r="56" fill="none" stroke="#2a5a9e" stroke-width="1.5" opacity="0.5"/>
+  <!-- Package box -->
+  <rect x="30" y="35" width="38" height="32" rx="4" fill="url(#box1)" stroke="#c9942e" stroke-width="1"/>
+  <line x1="49" y1="35" x2="49" y2="67" stroke="#a87d20" stroke-width="1.5"/>
+  <line x1="30" y1="50" x2="68" y2="50" stroke="#a87d20" stroke-width="1.5"/>
+  <!-- Tape cross -->
+  <rect x="44" y="44" width="10" height="14" rx="1" fill="#e8c35a" opacity="0.6"/>
+  <!-- Delivery truck -->
+  <rect x="55" y="62" width="34" height="22" rx="3" fill="url(#truck1)"/>
+  <rect x="74" y="62" width="15" height="16" rx="2" fill="#2a6fd6"/>
+  <rect x="76" y="64" width="11" height="10" rx="2" fill="#a8d4ff" opacity="0.7"/>
+  <!-- Wheels -->
+  <circle cx="63" cy="86" r="5" fill="#1a2d4d" stroke="#556b8a" stroke-width="1.5"/>
+  <circle cx="63" cy="86" r="2" fill="#8aa4c7"/>
+  <circle cx="82" cy="86" r="5" fill="#1a2d4d" stroke="#556b8a" stroke-width="1.5"/>
+  <circle cx="82" cy="86" r="2" fill="#8aa4c7"/>
+  <!-- Warning sparkle -->
+  <circle cx="85" cy="30" r="4" fill="#ff6b4a" opacity="0.8"/>
+  <text x="83" y="34" font-size="8" fill="#fff" font-weight="bold">!</text>
+</svg>

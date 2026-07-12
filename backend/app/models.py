@@ -42,6 +42,9 @@ class SendResponse(BaseModel):
     quick_replies: list[str] = Field(default_factory=list)
     degraded: bool = False
     provider: str = "fallback"
+    phase: str = "trust_building"
+    consequence_alert: str = ""
+    role_label: str = ""
 
 
 class EndRequest(BaseModel):
@@ -185,11 +188,15 @@ class SceneCreateRequest(SceneUpdateRequest):
 class DashboardStats(BaseModel):
     totalSessions: int
     todayActive: int
+    yesterdayActive: int = 0
+    yesterdayTotal: int = 0
     averageScore: float
+    yesterdayAverageScore: float = 0
     sceneRank: list[dict[str, int | str]]
     highRiskCount: int
     cognitiveErrorRate: float = 0
     highRiskTriggerRate: float = 0
+    yesterdayHighRiskRate: float = 0
     averageDimensions: dict[str, float]
 
 
@@ -202,7 +209,9 @@ class ConversationSummary(BaseModel):
     status: str
     riskPrivacy: int
     riskProperty: int
+    duration: int | None = None
     createdAt: str
+    userName: str = "匿名用户"
     messages: list[MessageRecord] = Field(default_factory=list)
 
 

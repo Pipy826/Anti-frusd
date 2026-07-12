@@ -1,14 +1,20 @@
 <template>
   <section class="screen history-screen is-active">
-    <StatusBar />
     <h1>历史记录</h1>
     <p>保留最近10次挑战记录，优先展示服务端复盘</p>
     <div class="history-list">
-      <button v-for="record in history" :key="record.id" @click="$emit('open', record)">
-        <img :src="getScene(record.sceneId).image" alt="">
-        <b>{{ record.sceneTitle }}<small>{{ modeLabel(record.mode) }}</small></b>
-        <strong>{{ record.score }}<span>分</span></strong>
-        <time>{{ formatTime(record.createdAt) }}</time>
+      <button v-for="record in history" :key="record.id" class="history-card" @click="$emit('open', record)">
+        <img class="history-card-img" :src="getScene(record.sceneId).image" alt="">
+        <div class="history-card-content">
+          <div class="history-card-body">
+            <div class="history-card-info">
+              <b>{{ record.sceneTitle }}</b>
+              <small>{{ modeLabel(record.mode) }}</small>
+            </div>
+            <strong>{{ record.score }}<span>分</span></strong>
+          </div>
+          <time>{{ formatTime(record.createdAt) }}</time>
+        </div>
       </button>
       <div v-if="!history.length" class="empty-state">暂无挑战记录</div>
     </div>
@@ -17,7 +23,6 @@
 </template>
 
 <script setup>
-import StatusBar from './StatusBar.vue'
 import TabBar from './TabBar.vue'
 import { getScene } from '../data/scenes'
 

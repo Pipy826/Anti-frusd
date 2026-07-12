@@ -1,6 +1,5 @@
 <template>
   <section class="screen video-screen is-active">
-    <StatusBar time="10:28" />
     <div class="video-title"><p>{{ timer }}</p><h2>{{ scene.modeIdentity }}</h2><span>通话中</span></div>
     <div class="digital-human">
       <img class="agent" src="/assets/agent-video.png?v=20260712" alt="">
@@ -20,7 +19,6 @@
 </template>
 
 <script setup>
-import StatusBar from './StatusBar.vue'
 
 defineProps({
   scene: { type: Object, required: true },

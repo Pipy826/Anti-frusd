@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2d5e"/>
+      <stop offset="100%" stop-color="#0a1830"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2a6bff"/>
+      <stop offset="100%" stop-color="#1a4ad4"/>
+    </linearGradient>
+    <linearGradient id="face4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5d4b3"/>
+      <stop offset="100%" stop-color="#d4a882"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="56" fill="url(#bg4)" opacity="0.9"/>
+  <circle cx="60" cy="60" r="56" fill="none" stroke="#2a4a8e" stroke-width="1.5" opacity="0.5"/>
+  <!-- Phone/tablet screen -->
+  <rect x="30" y="25" width="60" height="75" rx="8" fill="#0d1520" stroke="#3a5a8e" stroke-width="1.5"/>
+  <rect x="34" y="32" width="52" height="58" rx="3" fill="url(#screen)"/>
+  <!-- Video call face on screen -->
+  <circle cx="60" cy="52" r="14" fill="url(#face4)"/>
+  <!-- Eyes -->
+  <circle cx="55" cy="49" r="2" fill="#1a1a2e"/>
+  <circle cx="65" cy="49" r="2" fill="#1a1a2e"/>
+  <circle cx="55.5" cy="48.5" r="0.8" fill="#fff" opacity="0.8"/>
+  <circle cx="65.5" cy="48.5" r="0.8" fill="#fff" opacity="0.8"/>
+  <!-- Smile -->
+  <path d="M55 57 Q60 60 65 57" fill="none" stroke="#8b5e3c" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Hair -->
+  <path d="M46 45 Q48 35 60 33 Q72 35 74 45" fill="#2c1810" opacity="0.8"/>
+  <!-- Body silhouette on screen -->
+  <path d="M45 75 Q45 65 60 62 Q75 65 75 75" fill="#1a3a6b"/>
+  <!-- Deepfake glitch effect -->
+  <rect x="34" y="56" width="52" height="3" fill="#ff4444" opacity="0.3"/>
+  <rect x="34" y="42" width="20" height="2" fill="#00ff88" opacity="0.25"/>
+  <rect x="60" y="68" width="26" height="2" fill="#ff4444" opacity="0.25"/>
+  <!-- Video call UI elements -->
+  <circle cx="60" cy="94" r="3.5" fill="#333" stroke="#666" stroke-width="1"/>
+  <!-- Warning badge -->
+  <circle cx="78" cy="30" r="8" fill="#ff4444" opacity="0.9"/>
+  <text x="74" y="34.5" font-size="11" fill="#fff" font-weight="bold">AI</text>
+  <!-- Scan lines effect -->
+  <line x1="34" y1="38" x2="86" y2="38" stroke="#fff" stroke-width="0.3" opacity="0.2"/>
+  <line x1="34" y1="50" x2="86" y2="50" stroke="#fff" stroke-width="0.3" opacity="0.15"/>
+  <line x1="34" y1="62" x2="86" y2="62" stroke="#fff" stroke-width="0.3" opacity="0.2"/>
+  <line x1="34" y1="74" x2="86" y2="74" stroke="#fff" stroke-width="0.3" opacity="0.15"/>
+</svg>

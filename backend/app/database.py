@@ -238,9 +238,27 @@ def init_db() -> None:
                 FOREIGN KEY(attempt_id) REFERENCES cognitive_attempts(attempt_id) ON DELETE CASCADE,
                 FOREIGN KEY(question_id) REFERENCES cognitive_questions(id)
             );
+
+            CREATE TABLE IF NOT EXISTS user_settings (
+                tenant_id TEXT NOT NULL DEFAULT 'default',
+                user_name TEXT NOT NULL DEFAULT '反诈小卫士',
+                level TEXT NOT NULL DEFAULT 'Lv.1',
+                avatar TEXT NOT NULL DEFAULT '/assets/profile-avatar.png',
+                total_sessions INTEGER NOT NULL DEFAULT 0,
+                best_score INTEGER NOT NULL DEFAULT 0,
+                total_points INTEGER NOT NULL DEFAULT 0,
+                theme TEXT NOT NULL DEFAULT 'light',
+                notification_enabled INTEGER NOT NULL DEFAULT 1,
+                voice_enabled INTEGER NOT NULL DEFAULT 1,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (tenant_id)
+            );
             """
         )
         ensure_column(conn, "sessions", "precheck_attempt_id", "TEXT")
+        ensure_column(conn, "sessions", "phase", "TEXT NOT NULL DEFAULT 'trust_building'")
+        ensure_column(conn, "sessions", "intent_history_json", "TEXT NOT NULL DEFAULT '[]'")
+        ensure_column(conn, "sessions", "user_id", "INTEGER")
         ensure_column(conn, "messages", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
     seed_defaults()
 
@@ -397,6 +415,27 @@ def seed_defaults() -> None:
                 timestamp,
             ),
         )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_settings (
+                tenant_id, user_name, level, avatar, total_sessions, best_score, total_points,
+                theme, notification_enabled, voice_enabled, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                DEFAULT_TENANT_ID,
+                "反诈小卫士",
+                "Lv.1",
+                "/assets/profile-avatar.png",
+                0,
+                0,
+                0,
+                "light",
+                1,
+                1,
+                timestamp,
+            ),
+        )
         for scene_id, questions in DEFAULT_COGNITIVE_QUESTIONS.items():
             for question in questions:
                 conn.execute(
@@ -526,3 +565,73 @@ def create_prompt_version(scene_id: str, system_prompt: str, scoring_prompt: str
             (system_prompt, next_version, timestamp, scene_id, tenant_id),
         )
     return next_version
+
+
+def get_user_settings(tenant_id: str = DEFAULT_TENANT_ID) -> dict[str, Any]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM user_settings WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+    if not row:
+        timestamp = now_ts()
+        return set_user_settings(tenant_id, {}) or {
+            "user_name": "反诈小卫士",
+            "level": "Lv.1",
+            "avatar": "/assets/profile-avatar.png",
+            "total_sessions": 0,
+            "best_score": 0,
+            "total_points": 0,
+            "theme": "light",
+            "notification_enabled": True,
+            "voice_enabled": True,
+        }
+    return {
+        "user_name": row["user_name"],
+        "level": row["level"],
+        "avatar": row["avatar"],
+        "total_sessions": row["total_sessions"],
+        "best_score": row["best_score"],
+        "total_points": row["total_points"],
+        "theme": row["theme"],
+        "notification_enabled": bool(row["notification_enabled"]),
+        "voice_enabled": bool(row["voice_enabled"]),
+    }
+
+
+def set_user_settings(tenant_id: str, settings: dict[str, Any]) -> dict[str, Any] | None:
+    timestamp = now_ts()
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_settings (
+                tenant_id, user_name, level, avatar, total_sessions, best_score, total_points,
+                theme, notification_enabled, voice_enabled, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id) DO UPDATE SET
+                user_name = excluded.user_name,
+                level = excluded.level,
+                avatar = excluded.avatar,
+                total_sessions = excluded.total_sessions,
+                best_score = excluded.best_score,
+                total_points = excluded.total_points,
+                theme = excluded.theme,
+                notification_enabled = excluded.notification_enabled,
+                voice_enabled = excluded.voice_enabled,
+                updated_at = excluded.updated_at
+            """,
+            (
+                tenant_id,
+                settings.get("user_name", "反诈小卫士"),
+                settings.get("level", "Lv.1"),
+                settings.get("avatar", "/assets/profile-avatar.png"),
+                settings.get("total_sessions", 0),
+                settings.get("best_score", 0),
+                settings.get("total_points", 0),
+                settings.get("theme", "light"),
+                int(settings.get("notification_enabled", 1)),
+                int(settings.get("voice_enabled", 1)),
+                timestamp,
+            ),
+        )
+    return get_user_settings(tenant_id)

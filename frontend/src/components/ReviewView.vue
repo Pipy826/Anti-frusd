@@ -1,6 +1,5 @@
 <template>
   <section class="screen review-screen is-active">
-    <StatusBar />
     <h2 class="page-title">挑战结束</h2>
     <div class="score-medal" :aria-label="`${review.score}分 ${review.level}`">
       <div class="medal-stars">★ ★ ★</div>
@@ -42,7 +41,6 @@
 
 <script setup>
 import { computed } from 'vue'
-import StatusBar from './StatusBar.vue'
 
 const props = defineProps({
   review: { type: Object, required: true },

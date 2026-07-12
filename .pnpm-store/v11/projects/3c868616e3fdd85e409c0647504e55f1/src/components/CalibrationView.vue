@@ -1,6 +1,5 @@
 <template>
   <section class="screen calibration-screen is-active">
-    <StatusBar />
     <header class="simple-head">
       <button class="icon-btn" @click="$emit('back')">‹</button>
       <h2>认知校准</h2>
@@ -40,7 +39,6 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import StatusBar from './StatusBar.vue'
 import { reportFrontendError, submitCognitive } from '../services/api'
 
 const props = defineProps({

@@ -4,6 +4,105 @@ import { loadHistory as loadLocalHistory } from '../utils/storage'
 const API_TIMEOUT = 8000
 const USE_API = import.meta.env.VITE_USE_API === 'true'
 
+// ─── Token 管理 ──────────────────────────────────────────────────
+
+function getToken() {
+  return localStorage.getItem('anti_fraud_token') || ''
+}
+
+function setToken(token) {
+  localStorage.setItem('anti_fraud_token', token)
+}
+
+function clearToken() {
+  localStorage.removeItem('anti_fraud_token')
+  localStorage.removeItem('anti_fraud_user')
+}
+
+function getStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem('anti_fraud_user') || 'null')
+  } catch {
+    return null
+  }
+}
+
+function setStoredUser(user) {
+  localStorage.setItem('anti_fraud_user', JSON.stringify(user))
+}
+
+export function isLoggedIn() {
+  return Boolean(getToken())
+}
+
+export function isAdmin() {
+  const user = getStoredUser()
+  return user?.role === 'admin'
+}
+
+export function getCurrentUser() {
+  return getStoredUser()
+}
+
+export function logout() {
+  clearToken()
+}
+
+// ─── Auth API ────────────────────────────────────────────────────
+
+export async function apiLogin(username, password) {
+  const response = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || '登录失败')
+  }
+  const data = await response.json()
+  setToken(data.token)
+  setStoredUser(data.user)
+  return data
+}
+
+export async function apiRegister(username, password, nickname) {
+  const response = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, nickname: nickname || username })
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || '注册失败')
+  }
+  const data = await response.json()
+  setToken(data.token)
+  setStoredUser(data.user)
+  return data
+}
+
+export async function fetchCurrentUser() {
+  const token = getToken()
+  if (!token) return null
+  try {
+    const response = await fetch('/api/auth/me', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!response.ok) {
+      if (response.status === 401) clearToken()
+      return null
+    }
+    const user = await response.json()
+    setStoredUser(user)
+    return user
+  } catch {
+    return null
+  }
+}
+
+// ─── Request helpers ─────────────────────────────────────────────
+
 function withTimeout(promise, timeout = API_TIMEOUT) {
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeout)
@@ -36,6 +135,8 @@ function xhrJson(path) {
     const xhr = new XMLHttpRequest()
     xhr.open('GET', path, true)
     xhr.setRequestHeader('X-Tenant-ID', currentTenant())
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
     xhr.timeout = API_TIMEOUT
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -157,12 +258,28 @@ export async function fetchConversations(limit = 20) {
   return getAdminJson(`/api/admin/conversations?limit=${limit}`)
 }
 
+export async function fetchAdminUsers() {
+  return getAdminJson('/api/admin/users')
+}
+
 export async function fetchSafetyTerms() {
   return getAdminJson('/api/admin/safety-terms')
 }
 
 export async function createSafetyTerm(term) {
   return postAdminJson('/api/admin/safety-terms', term)
+}
+
+export async function fetchUserSettings() {
+  return getJson('/api/user/settings')
+}
+
+export async function updateUserSettings(settings) {
+  return postAdminJson('/api/user/settings', settings, 'PUT')
+}
+
+export async function fetchUserStats() {
+  return getJson('/api/user/stats')
 }
 
 async function postLikeJson(path, body, method = 'POST') {
@@ -193,8 +310,15 @@ function tenantHeaders() {
   return { 'X-Tenant-ID': currentTenant() }
 }
 
+function authHeaders() {
+  const token = getToken()
+  const headers = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return headers
+}
+
 function jsonHeaders() {
-  return { 'Content-Type': 'application/json', ...tenantHeaders() }
+  return { 'Content-Type': 'application/json', ...tenantHeaders(), ...authHeaders() }
 }
 
 export async function startChat(sceneId, mode) {

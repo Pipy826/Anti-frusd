@@ -27,6 +27,7 @@ class RiskAssessment:
     property_delta: int
     reason: str
     warning: str
+    intent: str = "neutral"
 
 
 def mask_sensitive_info(text: str) -> str:
@@ -127,7 +128,19 @@ def assess_user_risk(text: str, scene: dict[str, Any]) -> RiskAssessment:
     warning = ""
     if privacy_delta >= 20 or property_delta >= 20:
         warning = "这句话可能暴露隐私或造成资金风险，建议先暂停并通过官方渠道核实。"
-    return RiskAssessment(privacy_delta, property_delta, reason, warning)
+
+    # 判断用户意图
+    intent = "neutral"
+    if any(word in text for word in ["核实", "官方", "报警", "96110", "不转账", "不点击", "拒绝", "派出所", "原号码"]):
+        intent = "verify"
+    elif any(word in text for word in ["不行", "不要", "不可以", "挂断", "结束", "再见", "不相信", "我不"]):
+        intent = "refuse"
+    elif any(word in text for word in ["好的", "可以", "马上", "现在转", "发给你", "点一下", "登录", "扫码"]):
+        intent = "comply"
+    elif any(word in text for word in ["什么", "为什么", "哪个", "怎么", "谁", "？", "?"]):
+        intent = "question"
+
+    return RiskAssessment(privacy_delta, property_delta, reason, warning, intent)
 
 
 def match_configured_term(text: str, direction: str) -> dict[str, Any] | None:

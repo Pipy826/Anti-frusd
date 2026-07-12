@@ -1,6 +1,5 @@
 <template>
   <section class="screen screen-home is-active">
-    <StatusBar />
     <div class="notice"><span>!</span><p>{{ brand.complianceNotice }}</p></div>
     <header class="hero">
       <div>
@@ -58,7 +57,6 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import StatusBar from './StatusBar.vue'
 import TabBar from './TabBar.vue'
 
 const props = defineProps({
@@ -70,7 +68,7 @@ defineEmits(['select-scene', 'go'])
 const sceneListRef = ref(null)
 
 const stats = computed(() => {
-  const saved = localStorage.getItem('anti_fraud_history')
+  const saved = localStorage.getItem('anti_fraud_recent_history')
   const history = saved ? JSON.parse(saved) : []
   const scores = history.map(h => h.score).filter(Boolean)
   const bestScore = scores.length ? Math.max(...scores) : '--'
