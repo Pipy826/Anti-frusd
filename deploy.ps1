@@ -151,12 +151,11 @@ Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  DEPLOY COMPLETE!" -ForegroundColor Green
 Write-Host ""
-Write-Host "  HTTP:  http://${SERVER}:8080" -ForegroundColor White
-Write-Host "  HTTPS: https://${SERVER}:8443 (mobile)" -ForegroundColor White
+Write-Host "  URL: https://${SERVER}:8080" -ForegroundColor White
+Write-Host "  (same link for PC and mobile)" -ForegroundColor Gray
 Write-Host "  Admin: admin / admin123" -ForegroundColor White
 Write-Host ""
-Write-Host "  Open port 8080 AND 8443 in Alibaba Cloud" -ForegroundColor Yellow
-Write-Host "  Mobile: use HTTPS for microphone access" -ForegroundColor Yellow
+Write-Host "  Open port 8080 in Alibaba Cloud Security Group" -ForegroundColor Yellow
 Write-Host "  First visit shows cert warning - tap Advanced" -ForegroundColor Gray
 Write-Host "  Re-run this script anytime to update." -ForegroundColor Gray
 Write-Host "============================================" -ForegroundColor Cyan
