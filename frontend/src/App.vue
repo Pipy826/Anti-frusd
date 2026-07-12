@@ -571,7 +571,13 @@ async function startSpeechInput() {
         chatError.value = result?.degraded ? '语音识别暂不可用，请改用文字回复。' : '没有听清，请再说一遍。'
       }
     } catch (error) {
-      chatError.value = '麦克风或语音识别不可用，请改用文字回复。'
+      // Show specific error for debugging on mobile
+      const errMsg = error?.name === 'NotAllowedError' 
+        ? '麦克风权限被拒绝，请在浏览器设置中允许。'
+        : error?.name === 'NotFoundError'
+          ? '未检测到麦克风设备。'
+          : `录音失败(${error?.name || '未知'})，请检查麦克风权限。`
+      chatError.value = errMsg
       reportFrontendError(error, sessionId.value)
     } finally {
       if (screen.value === 'call') callState.value = '通话中'
@@ -597,75 +603,80 @@ async function startSpeechInput() {
   recognition.start()
 }
 
-async function recordPcm16(durationMs = 8000) {
-  // Use MediaRecorder for better mobile compatibility
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } })
-  
-  // Check if AudioContext approach works (desktop), otherwise use MediaRecorder
+async function recordPcm16(durationMs = 6000) {
+  // Mobile-compatible recording using MediaRecorder
+  const stream = await navigator.mediaDevices.getUserMedia({ 
+    audio: { echoCancellation: true, noiseSuppression: true } 
+  })
+
   const AudioContextClass = window.AudioContext || window.webkitAudioContext
   const audioContext = new AudioContextClass()
-  
-  // On mobile, AudioContext may be suspended and ScriptProcessor unreliable
-  // Use MediaRecorder + decodeAudioData approach instead
-  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-    ? 'audio/webm;codecs=opus' 
-    : MediaRecorder.isTypeSupported('audio/webm') 
-      ? 'audio/webm' 
-      : 'audio/mp4'
-  
-  const recorder = new MediaRecorder(stream, { mimeType })
+  // Resume context (required on mobile after user gesture)
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume()
+  }
+
+  // Determine supported mime type
+  let mimeType = ''
+  if (typeof MediaRecorder !== 'undefined') {
+    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus'
+    else if (MediaRecorder.isTypeSupported('audio/webm')) mimeType = 'audio/webm'
+    else if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4'
+    else if (MediaRecorder.isTypeSupported('audio/ogg')) mimeType = 'audio/ogg'
+  }
+
+  // If MediaRecorder not available or no supported type, fallback to ScriptProcessor
+  if (!mimeType || typeof MediaRecorder === 'undefined') {
+    return await recordPcm16Fallback(stream, audioContext, durationMs)
+  }
+
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
   const audioChunks = []
-  
+
   recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) {
+    if (event.data && event.data.size > 0) {
       audioChunks.push(event.data)
     }
   }
 
-  // Start recording with timeslice for periodic data
-  recorder.start(500)
-
-  // VAD using AnalyserNode (works better on mobile than ScriptProcessor)
+  // Use AnalyserNode for VAD
   const source = audioContext.createMediaStreamSource(stream)
   const analyser = audioContext.createAnalyser()
   analyser.fftSize = 2048
   analyser.smoothingTimeConstant = 0.3
   source.connect(analyser)
-  
+
   const dataArray = new Uint8Array(analyser.frequencyBinCount)
-  const SILENCE_THRESHOLD = 10       // frequency bin average below this = silence
-  const SILENCE_DURATION = 1500      // ms of silence to stop
-  const MIN_RECORD_TIME = 1200       // min recording time
+  const SILENCE_THRESHOLD = 8
+  const SILENCE_DURATION = 1500
+  const MIN_RECORD_TIME = 1500
   let silenceStart = 0
   let hasSpeech = false
   let recordStart = Date.now()
 
+  recorder.start(300)
+
   await new Promise((resolve) => {
     const checkInterval = setInterval(() => {
       const elapsed = Date.now() - recordStart
-      
-      // Hard time limit
+
       if (elapsed >= durationMs) {
         clearInterval(checkInterval)
         resolve()
         return
       }
 
-      // Check volume via analyser
       analyser.getByteFrequencyData(dataArray)
       let sum = 0
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i]
-      }
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]
       const avg = sum / dataArray.length
 
       if (avg > SILENCE_THRESHOLD) {
         hasSpeech = true
         silenceStart = 0
       } else if (hasSpeech && elapsed > MIN_RECORD_TIME) {
-        if (!silenceStart) {
-          silenceStart = Date.now()
-        } else if (Date.now() - silenceStart > SILENCE_DURATION) {
+        if (!silenceStart) silenceStart = Date.now()
+        else if (Date.now() - silenceStart > SILENCE_DURATION) {
           clearInterval(checkInterval)
           resolve()
         }
@@ -673,27 +684,26 @@ async function recordPcm16(durationMs = 8000) {
     }, 150)
   })
 
-  // Stop recording
+  // Stop
   recorder.stop()
   source.disconnect()
   stream.getTracks().forEach((track) => track.stop())
-  
-  // Wait for final data
   await new Promise((resolve) => { recorder.onstop = resolve })
-  
-  if (!hasSpeech || audioChunks.length === 0) {
+
+  if (audioChunks.length === 0) {
     await audioContext.close()
     return ''
   }
 
-  // Convert recorded audio to PCM16
+  // Decode to PCM
   const blob = new Blob(audioChunks, { type: mimeType })
   const arrayBuffer = await blob.arrayBuffer()
-  
+
   let audioBuffer
   try {
     audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
   } catch {
+    // decodeAudioData failed - try raw approach
     await audioContext.close()
     return ''
   }
@@ -701,6 +711,33 @@ async function recordPcm16(durationMs = 8000) {
 
   const rawData = audioBuffer.getChannelData(0)
   const pcm16 = encodePcm16(downsample(rawData, audioBuffer.sampleRate, 16000))
+  return arrayBufferToBase64(pcm16)
+}
+
+// Fallback for browsers without MediaRecorder support
+async function recordPcm16Fallback(stream, audioContext, durationMs) {
+  const source = audioContext.createMediaStreamSource(stream)
+  const processor = audioContext.createScriptProcessor(4096, 1, 1)
+  const chunks = []
+  let stopped = false
+
+  processor.onaudioprocess = (event) => {
+    if (stopped) return
+    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
+  }
+  source.connect(processor)
+  processor.connect(audioContext.destination)
+
+  await new Promise((resolve) => setTimeout(resolve, Math.min(durationMs, 5000)))
+  stopped = true
+  processor.disconnect()
+  source.disconnect()
+  stream.getTracks().forEach((track) => track.stop())
+  await audioContext.close()
+
+  if (chunks.length === 0) return ''
+  const merged = mergeFloat32(chunks)
+  const pcm16 = encodePcm16(downsample(merged, audioContext.sampleRate, 16000))
   return arrayBufferToBase64(pcm16)
 }
 
